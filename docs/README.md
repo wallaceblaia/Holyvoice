@@ -1,31 +1,72 @@
-# Holyvoice - Sistema de Processamento Audiovisual
+# Documentação do HolyVoice
 
 ## Visão Geral
-Holyvoice é um sistema modular de processamento audiovisual projetado para baixar, traduzir e dublar vídeos do YouTube ou locais, com capacidades avançadas de processamento de áudio e vídeo.
+O HolyVoice é uma plataforma de gerenciamento de músicas para igrejas, oferecendo funcionalidades de autenticação, gerenciamento de usuários, e processamento de áudio.
 
 ## Estrutura da Documentação
-Cada módulo do sistema possui sua própria documentação detalhada em arquivos markdown separados neste diretório. Para entender um módulo específico, consulte seu respectivo arquivo de documentação.
 
-## Módulos Disponíveis
-- [Autenticação e Controle de Acesso](./auth/README.md)
-- [Processamento de Vídeo](./video/README.md)
-- [Processamento de Áudio](./audio/README.md)
-- [Tradução](./translation/README.md)
-- [Síntese de Voz](./voice/README.md)
+### Módulos
+- [Autenticação](auth/authentication.md)
+  - Sistema completo de login e registro
+  - Controle de acesso baseado em papéis
+  - Segurança e validações
 
-## Requisitos do Sistema
+### Tecnologias Principais
+
+#### Backend
+- FastAPI
+- SQLAlchemy
+- PostgreSQL
+- JWT
+- Bcrypt
+
+#### Frontend
+- Next.js
+- Tailwind CSS
+- Shadcn/ui
+- React Hook Form
+- Zod
+
+## Configuração do Ambiente
+
+### Requisitos
+- Python 3.12+
 - Node.js 18+
-- Python 3.10+
-- PostgreSQL 14+
-- Redis
+- PostgreSQL 16+
 
-## Configuração Inicial
+### Instalação
 1. Clone o repositório
-2. Siga as instruções de instalação em cada módulo
-3. Configure as variáveis de ambiente necessárias
+2. Configure o ambiente virtual Python
+3. Instale as dependências do backend
+4. Instale as dependências do frontend
+5. Configure as variáveis de ambiente
+6. Inicialize o banco de dados
+7. Inicie os servidores
+
+### Estrutura de Diretórios
+```
+holyvoice/
+├── backend/
+│   ├── app/
+│   │   ├── api/
+│   │   ├── core/
+│   │   ├── crud/
+│   │   ├── db/
+│   │   ├── models/
+│   │   └── schemas/
+│   └── tests/
+├── frontend/
+│   ├── app/
+│   ├── components/
+│   ├── lib/
+│   └── public/
+└── docs/
+    ├── auth/
+    └── README.md
+```
 
 ## Contribuição
-Consulte o arquivo CONTRIBUTING.md para diretrizes de contribuição.
-
-## Licença
-MIT License - veja o arquivo LICENSE para detalhes.
+- Siga as diretrizes de código
+- Documente novas funcionalidades
+- Mantenha os testes atualizados
+- Use commits semânticos
