@@ -39,13 +39,14 @@ export function UserProfile() {
         method: "PATCH",
         headers: {
           Authorization: `Bearer ${localStorage.getItem("token")}`,
-          "Content-Type": "application/json",
+          "Content-Type": "text/plain",
         },
-        body: JSON.stringify({ avatar: avatarUrl }),
+        body: avatarUrl,
       })
 
       if (response.ok) {
-        setUserData({ ...userData, avatar: avatarUrl })
+        const updatedUser = await response.json()
+        setUserData(updatedUser)
       } else {
         console.error("Erro ao atualizar avatar:", await response.text())
       }
@@ -113,7 +114,8 @@ export function UserProfile() {
           </Avatar>
           <AvatarSelector 
             currentAvatar={userData.avatar} 
-            onSelect={handleAvatarSelect} 
+            onSelect={handleAvatarSelect}
+            userName={userData.name}
           />
         </div>
         <div>

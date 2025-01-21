@@ -41,6 +41,7 @@ python-dotenv>=1.0.1
 | created_at     | DateTime  | Data de criação da conta                 |
 | updated_at     | DateTime  | Data da última atualização               |
 | last_login     | DateTime  | Data do último login                     |
+| avatar         | String    | URL do avatar do usuário (opcional)      |
 
 ### Endpoints da API
 
@@ -60,28 +61,47 @@ python-dotenv>=1.0.1
 - **Campos**:
   - username (string, email do usuário)
   - password (string)
-- **Retorno**: Token JWT
+- **Retorno**: Token JWT e dados do usuário
+
+#### Obter Dados do Usuário
+- **URL**: `/api/v1/users/me`
+- **Método**: GET
+- **Headers**: Authorization: Bearer {token}
+- **Retorno**: Dados completos do usuário
+
+#### Atualizar Avatar
+- **URL**: `/api/v1/users/me`
+- **Método**: PATCH
+- **Headers**: 
+  - Authorization: Bearer {token}
+  - Content-Type: text/plain
+- **Body**: URL do avatar (string)
+- **Retorno**: Dados atualizados do usuário
 
 ### Validações
 - Email único no sistema
 - Senha e confirmação de senha devem coincidir
 - Email deve ser válido
 - Senha deve ser segura (mínimo 8 caracteres)
+- URL do avatar deve ser válida (se fornecida)
 
 ### Segurança
 - Senhas são hasheadas usando bcrypt
 - Tokens JWT com expiração configurável
 - Proteção contra força bruta
 - CORS configurado para permitir apenas origens específicas
+- Registro automático de último login
 
 ## Frontend
 
 ### Tecnologias Utilizadas
-- **Framework**: Next.js
+- **Framework**: Next.js 14
 - **UI Components**: Shadcn/ui
 - **Formulários**: React Hook Form
 - **Validação**: Zod
 - **Estilização**: Tailwind CSS
+- **Gerenciamento de Estado**: Zustand
+- **Diálogos**: HeadlessUI
 
 ### Temas e Estilos
 - Tema escuro por padrão
@@ -98,12 +118,34 @@ python-dotenv>=1.0.1
 - Button: Botão estilizado com variantes
 - Input: Campo de entrada com validação
 - Form: Componente de formulário com validação integrada
+- Avatar: Componente de exibição de avatar
+- AvatarSelector: Seletor de avatar com cores profissionais
+- UserNav: Navegação do usuário com menu dropdown
+
+### Sistema de Avatares
+- Geração dinâmica via UI Avatars API
+- 12 esquemas de cores profissionais
+- Avatares baseados nas iniciais do usuário
+- Cores disponíveis:
+  - Azul profundo
+  - Azul corporativo
+  - Azul marinho
+  - Azul acinzentado
+  - Cinza elegante
+  - Marrom executivo
+  - Roxo sofisticado
+  - Roxo acinzentado
+  - Verde musgo
+  - Azul noturno
+  - Vermelho vinho
+  - Preto elegante
 
 ### Validações no Frontend
 - Email válido
 - Senha com mínimo de 8 caracteres
 - Confirmação de senha
 - Nome obrigatório
+- URL do avatar válida
 
 ## Configuração
 
@@ -145,18 +187,29 @@ npm run dev
    - Backend verifica email único
    - Senha é hasheada
    - Usuário é criado no banco
+   - Avatar padrão é gerado com iniciais
 
 2. **Login**:
    - Usuário fornece credenciais
    - Backend verifica credenciais
+   - Data do último login é atualizada
    - Token JWT é gerado
    - Frontend armazena token
    - Usuário é redirecionado
 
-3. **Proteção de Rotas**:
+3. **Atualização de Avatar**:
+   - Usuário clica em "Alterar Avatar"
+   - Modal exibe opções de avatares com iniciais
+   - Usuário seleciona novo avatar
+   - Frontend envia URL via PATCH
+   - Backend atualiza avatar
+   - Interface atualiza automaticamente
+
+4. **Proteção de Rotas**:
    - Frontend verifica token
    - Backend valida token em requisições
    - Rotas protegidas verificam permissões
+   - Tipo de usuário (admin/normal) é verificado
 
 ## Considerações de Segurança
 
@@ -165,4 +218,5 @@ npm run dev
 - CORS configurado para segurança
 - Validações tanto no frontend quanto no backend
 - Proteção contra injeção SQL via ORM
-- Logs de tentativas de login 
+- Logs de tentativas de login
+- Sanitização de URLs de avatar 
