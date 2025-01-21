@@ -3,16 +3,20 @@
 import { useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { cn } from "@/lib/utils/index"
+import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { 
   ChevronLeft,
+  ChevronDown,
+  ChevronRight,
   Home,
   Music2,
   Users,
   Settings,
-  Menu as MenuIcon
+  Menu as MenuIcon,
+  FolderPlus,
+  Youtube
 } from "lucide-react"
 
 const menuItems = [
@@ -25,6 +29,17 @@ const menuItems = [
     title: "Músicas",
     href: "/dashboard/songs",
     icon: Music2,
+  },
+  {
+    title: "Cadastro",
+    icon: FolderPlus,
+    submenu: [
+      {
+        title: "Canais do YouTube",
+        href: "/dashboard/youtube/channels",
+        icon: Youtube,
+      }
+    ]
   },
   {
     title: "Usuários",
@@ -40,7 +55,12 @@ const menuItems = [
 
 export function SideMenu() {
   const [collapsed, setCollapsed] = useState(false)
+  const [openSubmenu, setOpenSubmenu] = useState<string | null>(null)
   const pathname = usePathname()
+
+  const toggleSubmenu = (title: string) => {
+    setOpenSubmenu(openSubmenu === title ? null : title)
+  }
 
   return (
     <div
@@ -69,28 +89,77 @@ export function SideMenu() {
       <ScrollArea className="h-[calc(100vh-8rem)]">
         <div className="space-y-2">
           {menuItems.map((item) => (
-            <Link key={item.href} href={item.href}>
-              <Button
-                variant={pathname === item.href ? "secondary" : "ghost"}
-                className={cn(
-                  "w-full justify-start",
-                  collapsed ? "px-2" : "px-4"
-                )}
-              >
-                <item.icon size={20} className={cn(
-                  "transition-colors",
-                  pathname === item.href 
-                    ? "text-primary" 
-                    : "text-muted-foreground group-hover:text-primary"
-                )} />
-                <span className={cn(
-                  "ml-2 transition-all duration-300",
-                  collapsed ? "opacity-0 w-0" : "opacity-100"
-                )}>
-                  {item.title}
-                </span>
-              </Button>
-            </Link>
+            <div key={item.title}>
+              {item.submenu ? (
+                <>
+                  <Button
+                    variant="ghost"
+                    className={cn(
+                      "w-full justify-start",
+                      collapsed ? "px-2" : "px-4"
+                    )}
+                    onClick={() => !collapsed && toggleSubmenu(item.title)}
+                  >
+                    <item.icon size={20} className="text-muted-foreground" />
+                    {!collapsed && (
+                      <>
+                        <span className="ml-2 flex-1 text-left">{item.title}</span>
+                        <ChevronRight
+                          size={16}
+                          className={cn(
+                            "transition-transform",
+                            openSubmenu === item.title && "rotate-90"
+                          )}
+                        />
+                      </>
+                    )}
+                  </Button>
+                  {!collapsed && openSubmenu === item.title && (
+                    <div className="ml-4 mt-2 space-y-2">
+                      {item.submenu.map((subItem) => (
+                        <Link key={subItem.href} href={subItem.href}>
+                          <Button
+                            variant={pathname === subItem.href ? "secondary" : "ghost"}
+                            className="w-full justify-start pl-6"
+                          >
+                            <subItem.icon size={18} className={cn(
+                              "transition-colors",
+                              pathname === subItem.href 
+                                ? "text-primary" 
+                                : "text-muted-foreground group-hover:text-primary"
+                            )} />
+                            <span className="ml-2">{subItem.title}</span>
+                          </Button>
+                        </Link>
+                      ))}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <Link href={item.href!}>
+                  <Button
+                    variant={pathname === item.href ? "secondary" : "ghost"}
+                    className={cn(
+                      "w-full justify-start",
+                      collapsed ? "px-2" : "px-4"
+                    )}
+                  >
+                    <item.icon size={20} className={cn(
+                      "transition-colors",
+                      pathname === item.href 
+                        ? "text-primary" 
+                        : "text-muted-foreground group-hover:text-primary"
+                    )} />
+                    <span className={cn(
+                      "ml-2 transition-all duration-300",
+                      collapsed ? "opacity-0 w-0" : "opacity-100"
+                    )}>
+                      {item.title}
+                    </span>
+                  </Button>
+                </Link>
+              )}
+            </div>
           ))}
         </div>
       </ScrollArea>
