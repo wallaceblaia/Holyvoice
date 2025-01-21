@@ -16,7 +16,10 @@ import {
   Settings,
   Menu as MenuIcon,
   FolderPlus,
-  Youtube
+  Youtube,
+  Video,
+  Radio,
+  Activity
 } from "lucide-react"
 
 const menuItems = [
@@ -24,6 +27,27 @@ const menuItems = [
     title: "Início",
     href: "/dashboard",
     icon: Home,
+  },
+  {
+    title: "Projetos",
+    icon: FolderPlus,
+    submenu: [
+      {
+        title: "Vídeo do Youtube",
+        href: "/dashboard/projects/youtube",
+        icon: Video,
+      },
+      {
+        title: "Live",
+        href: "/dashboard/projects/live",
+        icon: Radio,
+      },
+      {
+        title: "Monitoramento",
+        href: "/dashboard/projects/monitoring",
+        icon: Activity,
+      }
+    ]
   },
   {
     title: "Músicas",
