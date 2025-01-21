@@ -5,8 +5,8 @@ import "./globals.css"
 const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "Holyvoice",
-  description: "Sistema de processamento audiovisual",
+  title: "HolyVoice",
+  description: "Plataforma de gerenciamento de músicas para igrejas",
 }
 
 export default function RootLayout({
@@ -15,8 +15,10 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="pt-BR">
-      <body className={inter.className}>{children}</body>
+    <html lang="pt-BR" suppressHydrationWarning className="dark">
+      <body className={`${inter.className} antialiased bg-background`} suppressHydrationWarning>
+        {children}
+      </body>
     </html>
   )
 }
