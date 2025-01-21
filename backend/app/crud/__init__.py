@@ -1,4 +1,13 @@
-from .crud_user import user
+from app.crud.crud_user import user
+from app.crud.youtube import youtube, youtube_playlist, youtube_video, youtube_access
+
+__all__ = [
+    "user",
+    "youtube",
+    "youtube_playlist",
+    "youtube_video",
+    "youtube_access",
+]
 
 # For a new basic set of CRUD operations you could just do
 
