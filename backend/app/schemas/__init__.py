@@ -15,6 +15,11 @@ from .youtube import (
     YoutubeChannelAccessCreate,
     YoutubeChannelWithVideos
 )
+from .monitoring import (
+    MonitoringBase, MonitoringCreate, MonitoringUpdate, MonitoringInDB,
+    MonitoringWithDetails, MonitoringListItem,
+    MonitoringVideoBase, MonitoringVideoCreate, MonitoringVideoUpdate, MonitoringVideoInDB
+)
 
 __all__ = [
     "User",

@@ -3,7 +3,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, Body
 from sqlalchemy.orm import Session
 
-from app import crud, models, schemas
+from app.crud.crud_user import crud_user
+from app import models, schemas
 from app.api import deps
 
 router = APIRouter()
@@ -28,5 +29,5 @@ def update_user_me(
     Atualiza informações do usuário atual.
     """
     user_in = schemas.UserUpdate(avatar=avatar)
-    user = crud.user.update(db, db_obj=current_user, obj_in=user_in)
+    user = crud_user.update(db, db_obj=current_user, obj_in=user_in)
     return user 

@@ -1,148 +1,110 @@
+import yt_dlp
 from datetime import datetime
-from typing import Dict, Any, Optional, List
-import aiohttp
-import re
+from typing import Dict, List, Optional, Any
 from app.core.cache import YouTubeCache
 
 
 class YouTubeService:
-    BASE_URL = "https://www.googleapis.com/youtube/v3"
-
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-
-    async def _make_request(self, endpoint: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Faz uma requisição para a API do YouTube.
-        """
-        params["key"] = self.api_key
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"{self.BASE_URL}/{endpoint}", params=params) as response:
-                if response.status != 200:
-                    error_data = await response.json()
-                    raise Exception(f"Erro na API do YouTube: {error_data.get('error', {}).get('message', 'Erro desconhecido')}")
-                return await response.json()
+    def __init__(self, api_key: str = None):
+        # api_key não será mais necessária, mas mantemos o parâmetro para compatibilidade
+        self.ydl_opts = {
+            'quiet': True,
+            'extract_flat': True,
+            'force_json': True,
+            'no_warnings': True
+        }
 
     async def extract_channel_id(self, channel_url: str) -> Optional[str]:
-        """
-        Extrai o ID do canal a partir da URL.
-        Suporta vários formatos de URL do YouTube.
-        """
-        # Padrões de URL do YouTube
-        patterns = [
-            r"youtube\.com/channel/([^/?&]+)",  # URLs de canal padrão
-            r"youtube\.com/c/([^/?&]+)",        # URLs personalizadas
-            r"youtube\.com/@([^/?&]+)",         # URLs de handle
-            r"youtube\.com/user/([^/?&]+)"      # URLs de usuário antigas
-        ]
-        
-        for pattern in patterns:
-            match = re.search(pattern, channel_url)
-            if match:
-                identifier = match.group(1)
-                
-                # Se for uma URL personalizada ou handle, precisamos fazer uma busca
-                if "c/" in channel_url or "@" in channel_url or "user/" in channel_url:
-                    try:
-                        # Busca o canal usando o identificador
-                        params = {
-                            "part": "id",
-                            "forUsername" if "user/" in channel_url else "q": identifier,
-                            "type": "channel",
-                            "maxResults": 1
-                        }
-                        result = await self._make_request("search", params)
-                        items = result.get("items", [])
-                        if items:
-                            return items[0]["id"]["channelId"]
-                    except Exception:
-                        continue
-                else:
-                    return identifier
-        
-        return None
-
-    async def get_channel_info(self, channel_id: str) -> Optional[Dict[str, Any]]:
-        """
-        Obtém informações detalhadas de um canal.
-        """
         try:
-            # Primeira requisição para informações básicas
-            params = {
-                "part": "snippet,statistics,brandingSettings",
-                "id": channel_id
-            }
-            result = await self._make_request("channels", params)
-            
-            if not result.get("items"):
-                return None
-            
-            channel = result["items"][0]
-            snippet = channel["snippet"]
-            statistics = channel["statistics"]
-            branding = channel.get("brandingSettings", {})
-            
-            return {
-                "title": snippet["title"],
-                "description": snippet.get("description", ""),
-                "avatar_image": snippet.get("thumbnails", {}).get("high", {}).get("url"),
-                "banner_image": branding.get("image", {}).get("bannerExternalUrl"),
-                "subscriber_count": int(statistics.get("subscriberCount", 0)),
-                "video_count": int(statistics.get("videoCount", 0)),
-                "view_count": int(statistics.get("viewCount", 0))
-            }
+            print(f"Extraindo ID do canal da URL: {channel_url}")
+            with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
+                info = ydl.extract_info(channel_url, download=False)
+                channel_id = info.get('channel_id')
+                print(f"ID do canal extraído: {channel_id}")
+                return channel_id
+        except Exception as e:
+            print(f"Erro ao extrair ID do canal: {str(e)}")
+            return None
+
+    async def get_channel_info(self, channel_url: str) -> Optional[Dict[str, Any]]:
+        try:
+            print(f"Obtendo informações do canal: {channel_url}")
+            with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
+                info = ydl.extract_info(f"{channel_url}/videos", download=False)
+                
+                # Obtém a thumbnail de melhor qualidade
+                thumbnails = info.get('thumbnails', [])
+                avatar_url = thumbnails[-1].get('url') if thumbnails else ''
+                
+                channel_info = {
+                    "title": info.get('channel', ''),
+                    "description": info.get('description', ''),
+                    "avatar_image": avatar_url,
+                    "banner_image": avatar_url,  # Usando mesmo avatar como banner por enquanto
+                    "subscriber_count": 0,  # Valor fixo por enquanto
+                    "video_count": info.get('playlist_count', 0),
+                    "view_count": 0  # Será calculado pela soma dos vídeos
+                }
+                print(f"Informações obtidas: {channel_info}")
+                return channel_info
         except Exception as e:
             print(f"Erro ao obter informações do canal: {str(e)}")
             return None
 
-    async def get_recent_videos(self, channel_id: str, max_results: int = 10) -> List[Dict[str, Any]]:
-        """
-        Obtém os vídeos mais recentes de um canal.
-        """
+    async def get_recent_videos(self, channel_id: str, max_results: int = 12) -> List[Dict[str, Any]]:
         try:
-            # Primeiro, obtém os IDs dos vídeos mais recentes
-            params = {
-                "part": "id",
-                "channelId": channel_id,
-                "order": "date",
-                "maxResults": max_results,
-                "type": "video"
+            print(f"Buscando {max_results} vídeos recentes do canal {channel_id}")
+            ydl_opts = {
+                **self.ydl_opts,
+                'playlist_items': f'1-{max_results}'
             }
-            search_result = await self._make_request("search", params)
             
-            if not search_result.get("items"):
-                return []
-            
-            # Extrai os IDs dos vídeos
-            video_ids = [item["id"]["videoId"] for item in search_result["items"]]
-            
-            # Obtém informações detalhadas dos vídeos
-            params = {
-                "part": "snippet,statistics,liveStreamingDetails",
-                "id": ",".join(video_ids)
-            }
-            videos_result = await self._make_request("videos", params)
-            
-            videos = []
-            for item in videos_result.get("items", []):
-                snippet = item["snippet"]
-                statistics = item.get("statistics", {})
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(f"https://www.youtube.com/channel/{channel_id}/videos", download=False)
+                print("Dados brutos retornados pelo yt-dlp:")
+                print(info)
                 
-                video = {
-                    "id": item["id"],
-                    "title": snippet["title"],
-                    "description": snippet.get("description", ""),
-                    "thumbnail_url": snippet.get("thumbnails", {}).get("high", {}).get("url"),
-                    "published_at": snippet["publishedAt"],
-                    "view_count": int(statistics.get("viewCount", 0)),
-                    "like_count": int(statistics.get("likeCount", 0)),
-                    "is_live": bool(item.get("liveStreamingDetails"))
-                }
-                videos.append(video)
-            
-            return videos
+                videos = []
+                print("\nProcessando entradas de vídeos:")
+                for entry in info.get('entries', []):
+                    if entry:
+                        print(f"\nDados do vídeo:")
+                        print(f"ID: {entry.get('id')}")
+                        print(f"Título: {entry.get('title')}")
+                        print(f"Data de upload: {entry.get('upload_date')}")
+                        print(f"Thumbnails: {entry.get('thumbnails')}")
+                        
+                        upload_date = entry.get('upload_date', '')
+                        try:
+                            published_at = datetime.strptime(upload_date, '%Y%m%d') if upload_date else datetime.now()
+                        except:
+                            published_at = datetime.now()
+                        
+                        # Garante que o ID seja string
+                        video_id = str(entry.get('id', ''))
+                        # Usa o formato padrão de thumbnail do YouTube em alta qualidade
+                        thumbnail_url = f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg"
+                        
+                        video = {
+                            "id": video_id,
+                            "title": entry.get('title', ''),
+                            "description": entry.get('description', ''),
+                            "thumbnail_url": thumbnail_url,
+                            "published_at": published_at,
+                            "view_count": entry.get('view_count', 0),
+                            "like_count": entry.get('like_count', 0),
+                            "is_live": entry.get('is_live', False)
+                        }
+                        print(f"Vídeo processado: {video}")
+                        videos.append(video)
+                
+                print(f"Total de vídeos processados: {len(videos)}")
+                return videos
+                
         except Exception as e:
             print(f"Erro ao obter vídeos recentes: {str(e)}")
+            import traceback
+            print(f"Traceback: {traceback.format_exc()}")
             return []
 
     async def validate_channel(self, channel_url: str) -> Dict[str, Any]:
@@ -257,4 +219,56 @@ class YouTubeService:
 
         # Salva no cache
         await YouTubeCache.set_playlist_videos(playlist_id, videos)
-        return videos 
+        return videos
+
+    async def extract_video_id(self, video_url: str) -> Optional[str]:
+        try:
+            print(f"Extraindo ID do vídeo da URL: {video_url}")
+            with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
+                info = ydl.extract_info(video_url, download=False, process=False)
+                # Verifica se é um vídeo individual
+                if info.get('_type') == 'url' and 'watch?v=' in video_url:
+                    # Extrai o ID do vídeo da URL
+                    import re
+                    video_id_match = re.search(r'v=([^&]+)', video_url)
+                    if video_id_match:
+                        video_id = video_id_match.group(1)
+                        print(f"ID do vídeo extraído: {video_id}")
+                        return video_id
+                # Se não for um vídeo individual, tenta pegar o ID diretamente
+                video_id = info.get('id')
+                print(f"ID do vídeo extraído: {video_id}")
+                return video_id
+        except Exception as e:
+            print(f"Erro ao extrair ID do vídeo: {str(e)}")
+            return None
+
+    async def get_video_info(self, video_id: str) -> Optional[Dict[str, Any]]:
+        try:
+            print(f"Obtendo informações do vídeo: {video_id}")
+            video_url = f"https://www.youtube.com/watch?v={video_id}"
+            with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
+                info = ydl.extract_info(video_url, download=False)
+                
+                upload_date = info.get('upload_date', '')
+                try:
+                    published_at = datetime.strptime(upload_date, '%Y%m%d') if upload_date else datetime.now()
+                except:
+                    published_at = datetime.now()
+                
+                video_info = {
+                    "id": info.get('id', ''),
+                    "channel_id": info.get('channel_id', ''),
+                    "title": info.get('title', ''),
+                    "description": info.get('description', ''),
+                    "thumbnail_url": info.get('thumbnail', ''),
+                    "published_at": published_at,
+                    "view_count": info.get('view_count', 0),
+                    "like_count": info.get('like_count', 0),
+                    "is_live": info.get('is_live', False)
+                }
+                print(f"Informações obtidas: {video_info}")
+                return video_info
+        except Exception as e:
+            print(f"Erro ao obter informações do vídeo: {str(e)}")
+            return None 

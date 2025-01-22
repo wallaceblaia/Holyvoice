@@ -14,6 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { api } from "@/lib/axios"
 
 interface Channel {
   id: number
@@ -29,7 +30,8 @@ interface Channel {
 }
 
 interface Video {
-  id: string
+  id: number
+  video_id: string
   title: string
   thumbnail_url: string
   published_at: string
@@ -45,36 +47,24 @@ export default function ChannelDetailsPage() {
   const [selectedVideo, setSelectedVideo] = React.useState<Video | null>(null)
 
   React.useEffect(() => {
-    const fetchChannelDetails = async () => {
+    async function fetchChannelDetails() {
       try {
-        const token = localStorage.getItem('token')
-        if (!token) {
-          toast({
-            title: "Erro",
-            description: "Você precisa estar logado para visualizar os detalhes do canal",
-            variant: "destructive",
-          })
-          return
-        }
-
-        const response = await fetch(`http://localhost:8000/api/v1/youtube/channels/${params.id}`, {
-          headers: {
-            "Authorization": `Bearer ${token}`,
-          }
-        })
-
-        if (!response.ok) {
-          const error = await response.json()
-          throw new Error(error.detail || "Erro ao carregar dados do canal")
-        }
-        const data = await response.json()
-        setChannel(data)
-        setRecentVideos(data.recent_videos || [])
+        const response = await api.get(`/api/v1/youtube/channels/${params.id}`)
+        console.log('Dados dos vídeos recentes:', response.data.recent_videos)
+        setChannel(response.data)
+        
+        // Garantir que cada vídeo tenha um ID único
+        const videos = (response.data.recent_videos || []).map((video: Video, index: number) => ({
+          ...video,
+          // Se não tiver id, usa o índice como fallback
+          id: video.id || index + 1
+        }))
+        setRecentVideos(videos)
       } catch (error) {
         console.error("Erro ao carregar detalhes do canal:", error)
         toast({
           title: "Erro",
-          description: error instanceof Error ? error.message : "Erro ao carregar detalhes do canal",
+          description: "Não foi possível carregar os detalhes do canal",
           variant: "destructive",
         })
       } finally {
@@ -144,7 +134,7 @@ export default function ChannelDetailsPage() {
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {recentVideos.map((video) => (
             <Card 
-              key={video.id} 
+              key={video.video_id} 
               className="overflow-hidden cursor-pointer hover:shadow-lg transition-shadow"
               onClick={() => setSelectedVideo(video)}
             >
@@ -185,7 +175,7 @@ export default function ChannelDetailsPage() {
             {selectedVideo && (
               <iframe
                 className="w-full h-full rounded-lg"
-                src={`https://www.youtube.com/embed/${selectedVideo.id}`}
+                src={`https://www.youtube.com/embed/${selectedVideo.video_id}`}
                 title={selectedVideo.title}
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                 allowFullScreen

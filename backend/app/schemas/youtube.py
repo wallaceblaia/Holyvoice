@@ -5,12 +5,18 @@ import re
 
 
 class YoutubeVideo(BaseModel):
-    id: str
+    id: Optional[int] = None
+    video_id: str
+    channel_id: int
     title: str
     description: Optional[str] = None
-    thumbnail_url: Optional[str] = None
+    thumbnail_url: str
     published_at: datetime
+    view_count: Optional[int] = 0
+    like_count: Optional[int] = 0
     is_live: bool = False
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -109,9 +115,13 @@ class YoutubeChannelUpdate(BaseModel):
     api_key: Optional[str] = Field(None, min_length=30)
 
 
-class YoutubeVideoCreate(YoutubeVideo):
+class YoutubeVideoCreate(BaseModel):
+    video_id: str
+    title: str
+    thumbnail_url: str
+    published_at: datetime
+    is_live: bool = False
     channel_id: int
-    playlist_id: Optional[int] = None
 
 
 class YoutubeVideoUpdate(BaseModel):
@@ -119,6 +129,16 @@ class YoutubeVideoUpdate(BaseModel):
     description: Optional[str] = None
     thumbnail_url: Optional[str] = None
     is_live: Optional[bool] = None
+
+
+class YoutubeVideoInDB(YoutubeVideo):
+    id: int
+    channel_id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 class YoutubeChannel(YoutubeChannelBase):

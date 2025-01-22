@@ -64,6 +64,7 @@ export function UserAuthForm({ type, className, ...props }: UserAuthFormProps) {
           headers: {
             "Content-Type": "application/x-www-form-urlencoded",
           },
+          credentials: "include",
           body: formData,
         })
 
