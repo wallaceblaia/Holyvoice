@@ -5,7 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
-from app import crud, models, schemas
+from app.crud.crud_user import crud_user
+from app import models, schemas
 from app.api import deps
 from app.core import security
 from app.core.config import settings
@@ -21,7 +22,7 @@ def register(
     """
     Registra um novo usuário.
     """
-    user = crud.user.get_by_email(db, email=user_in.email)
+    user = crud_user.get_by_email(db, email=user_in.email)
     if user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -34,7 +35,7 @@ def register(
             detail="As senhas não coincidem.",
         )
         
-    user = crud.user.create(db, obj_in=user_in)
+    user = crud_user.create(db, obj_in=user_in)
     return user
 
 @router.post("/login", response_model=schemas.Token)
@@ -45,7 +46,7 @@ def login(
     """
     Login OAuth2 com JWT para obter token de acesso.
     """
-    user = crud.user.authenticate(
+    user = crud_user.authenticate(
         db, email=form_data.username, password=form_data.password
     )
     if not user:
@@ -53,7 +54,7 @@ def login(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Email ou senha incorretos.",
         )
-    elif not crud.user.is_active(user):
+    elif not crud_user.is_active(user):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Usuário inativo.",
@@ -62,7 +63,7 @@ def login(
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     return {
         "access_token": security.create_access_token(
-            user.id, expires_delta=access_token_expires
+            user.email, expires_delta=access_token_expires
         ),
         "token_type": "bearer",
     } 

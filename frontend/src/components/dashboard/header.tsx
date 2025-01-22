@@ -50,7 +50,9 @@ export function Header() {
         const response = await fetch("http://localhost:8000/api/v1/users/me", {
           headers: {
             Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
           },
+          credentials: "include",
         })
         
         if (response.ok) {

@@ -6,7 +6,8 @@ from jose import jwt
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
-from app import crud, models, schemas
+from app.crud.crud_user import crud_user
+from app import models
 from app.core import security
 from app.core.config import settings
 from app.db.session import SessionLocal
@@ -31,13 +32,18 @@ def get_current_user(
         payload = jwt.decode(
             token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
         )
-        token_data = schemas.TokenPayload(**payload)
+        email: str = payload.get("sub")
+        if email is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Não foi possível validar as credenciais",
+            )
     except (jwt.JWTError, ValidationError):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Não foi possível validar as credenciais",
         )
-    user = crud.user.get(db, id=token_data.sub)
+    user = crud_user.get_by_email(db, email=email)
     if not user:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
     return user
@@ -46,7 +52,7 @@ def get_current_user(
 def get_current_active_user(
     current_user: models.User = Depends(get_current_user),
 ) -> models.User:
-    if not crud.user.is_active(current_user):
+    if not crud_user.is_active(current_user):
         raise HTTPException(status_code=400, detail="Usuário inativo")
     return current_user
 
@@ -54,7 +60,7 @@ def get_current_active_user(
 def get_current_active_superuser(
     current_user: models.User = Depends(get_current_user),
 ) -> models.User:
-    if not crud.user.is_superuser(current_user):
+    if not crud_user.is_superuser(current_user):
         raise HTTPException(
             status_code=400, detail="O usuário não tem privilégios suficientes"
         )

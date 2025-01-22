@@ -1,12 +1,11 @@
-from app.crud.crud_user import user
-from app.crud.youtube import youtube, youtube_playlist, youtube_video, youtube_access
+from .crud_user import crud_user
+from .crud_youtube import crud_youtube
+from .crud_monitoring import crud_monitoring
 
 __all__ = [
-    "user",
-    "youtube",
-    "youtube_playlist",
-    "youtube_video",
-    "youtube_access",
+    "crud_user",
+    "crud_youtube",
+    "crud_monitoring"
 ]
 
 # For a new basic set of CRUD operations you could just do

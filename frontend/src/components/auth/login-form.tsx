@@ -1,3 +1,5 @@
+"use client"
+
 import { useState } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -5,6 +7,8 @@ import * as z from "zod"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useRouter } from "next/navigation"
+import { api } from "@/lib/axios"
+import { useToast } from "@/components/ui/use-toast"
 
 const loginSchema = z.object({
   email: z.string().email("Email inválido"),
@@ -16,6 +20,7 @@ type LoginFormData = z.infer<typeof loginSchema>
 export function LoginForm() {
   const [isLoading, setIsLoading] = useState(false)
   const router = useRouter()
+  const { toast } = useToast()
 
   const {
     register,
@@ -29,11 +34,27 @@ export function LoginForm() {
     setIsLoading(true)
 
     try {
-      // TODO: Implementar integração com backend
-      console.log(data)
+      const response = await api.post("/auth/login", {
+        username: data.email,
+        password: data.password,
+      })
+
+      const token = response.data.access_token
+      localStorage.setItem("token", token)
+      console.log('Token salvo:', token)
+
+      // Teste se o token foi salvo corretamente
+      const savedToken = localStorage.getItem("token")
+      console.log('Token recuperado:', savedToken)
+
       router.push("/dashboard")
     } catch (error) {
       console.error(error)
+      toast({
+        title: "Erro ao fazer login",
+        description: "Verifique suas credenciais e tente novamente.",
+        variant: "destructive",
+      })
     } finally {
       setIsLoading(false)
     }

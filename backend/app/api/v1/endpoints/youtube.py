@@ -1,10 +1,12 @@
 from typing import Any, List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Body
 from sqlalchemy.orm import Session
+from sqlalchemy import desc
 
-from app import crud, models, schemas
+from app.crud.crud_youtube import crud_youtube
+from app import models, schemas
 from app.api import deps
-from app.core.security import encrypt_api_key, decrypt_api_key
+from app.core.security import encrypt_api_key, decrypt_api_key, get_current_active_user
 from app.services.youtube import YouTubeService
 
 router = APIRouter()
@@ -24,14 +26,6 @@ async def create_channel(
         print("Iniciando criação do canal...")
         print(f"Dados recebidos: {channel_in.dict()}")
         
-        # Verifica se o canal já existe
-        existing_channel = crud.youtube.get_by_url(db, channel_url=channel_in.channel_url)
-        if existing_channel:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Canal já cadastrado"
-            )
-        
         print("Inicializando serviço do YouTube...")
         # Inicializa o serviço do YouTube
         youtube_service = YouTubeService(api_key=channel_in.api_key)
@@ -45,6 +39,14 @@ async def create_channel(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="URL do canal inválida"
+            )
+            
+        # Verifica se o canal já existe
+        existing_channel = crud_youtube.get_channel_by_youtube_id(db, youtube_id=channel_id)
+        if existing_channel:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Canal já cadastrado"
             )
         
         print("Obtendo informações do canal...")
@@ -79,7 +81,7 @@ async def create_channel(
         
         print("Criando canal no banco de dados...")
         # Cria o canal no banco de dados
-        channel = crud.youtube.create(db, obj_in=channel_data)
+        channel = crud_youtube.create(db, obj_in=channel_data)
         
         print("Criando registro de acesso...")
         # Cria o registro de acesso para o usuário atual
@@ -91,7 +93,7 @@ async def create_channel(
             can_delete=True,
             created_by=current_user.id
         )
-        crud.youtube_access.create(db, obj_in=access_data)
+        crud_youtube.create_access(db, obj_in=access_data)
         
         print("Canal criado com sucesso!")
         return channel
@@ -124,10 +126,10 @@ async def list_channels(
     try:
         # Se o usuário for superusuário, retorna todos os canais
         if current_user.is_superuser:
-            return crud.youtube.get_multi(db, skip=skip, limit=limit)
+            return crud_youtube.get_multi(db, skip=skip, limit=limit)
         
         # Caso contrário, retorna apenas os canais que o usuário tem acesso
-        return crud.youtube.get_multi_by_user(
+        return crud_youtube.get_channels_by_user(
             db, 
             user_id=current_user.id,
             skip=skip,
@@ -154,19 +156,18 @@ async def get_channel(
     try:
         # Verifica se o usuário tem acesso ao canal
         if not current_user.is_superuser:
-            access = crud.youtube_access.get_by_user_and_channel(
+            if not crud_youtube.user_can_access_channel(
                 db,
                 user_id=current_user.id,
                 channel_id=channel_id
-            )
-            if not access or not access.can_view:
+            ):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Sem permissão para acessar este canal"
                 )
         
         # Obtém o canal do banco de dados
-        channel = crud.youtube.get(db, id=channel_id)
+        channel = crud_youtube.get_channel(db, id=channel_id)
         if not channel:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -178,13 +179,43 @@ async def get_channel(
         youtube_service = YouTubeService(api_key=decrypted_api_key)
         
         # Obtém os vídeos recentes
-        recent_videos = await youtube_service.get_recent_videos(channel.youtube_id)
+        videos = await youtube_service.get_recent_videos(channel.youtube_id)
+        
+        # Mapeia os vídeos para o formato correto
+        recent_videos = []
+        for video in videos:
+            print(f"\nCriando objeto YoutubeVideo com dados: {video}")
+            video_data = schemas.YoutubeVideo(
+                id=0,  # ID será definido quando salvo no banco
+                video_id=str(video["id"]),  # Garante que seja string
+                channel_id=channel.id,
+                title=video["title"],
+                thumbnail_url=video["thumbnail_url"],
+                published_at=video["published_at"],
+                is_live=video.get("is_live", False),
+                created_at=None,
+                updated_at=None
+            )
+            recent_videos.append(video_data)
         
         # Retorna o canal com os vídeos
-        return {
-            **channel.__dict__,
-            "recent_videos": recent_videos
-        }
+        channel_data = schemas.YoutubeChannelWithVideos(
+            id=channel.id,
+            youtube_id=channel.youtube_id,
+            channel_url=channel.channel_url,
+            channel_name=channel.channel_name,
+            description=channel.description,
+            avatar_image=channel.avatar_image,
+            banner_image=channel.banner_image,
+            subscriber_count=channel.subscriber_count,
+            video_count=channel.video_count,
+            view_count=channel.view_count,
+            created_at=channel.created_at,
+            updated_at=channel.updated_at,
+            last_sync_at=channel.last_sync_at,
+            recent_videos=recent_videos
+        )
+        return channel_data
         
     except HTTPException as e:
         raise e
@@ -203,53 +234,82 @@ async def get_channel_videos(
     channel_id: int,
     db: Session = Depends(deps.get_db),
     current_user: models.User = Depends(deps.get_current_user),
-    limit: int = 10
+    limit: int = 12,
+    sort: str = "-published_at"
 ):
     """
     Retorna os vídeos mais recentes de um canal.
     """
-    channel = crud.youtube.get(db, id=channel_id)
+    channel = crud_youtube.get_channel(db, id=channel_id)
     if not channel:
         raise HTTPException(status_code=404, detail="Canal não encontrado")
     
     # Verifica se o usuário tem acesso ao canal
-    if not crud.youtube_access.has_access(db, channel_id=channel.id, user_id=current_user.id):
+    if not crud_youtube.user_can_access_channel(db, channel_id=channel.id, user_id=current_user.id):
         raise HTTPException(status_code=403, detail="Acesso não autorizado")
     
     try:
-        # Cria uma instância do serviço com a chave da API do canal
-        youtube_service = YouTubeService(channel.api_key)
-        
-        # Obtém os vídeos recentes
+        print("Tentando buscar vídeos do YouTube...")
+        # Primeiro tenta buscar do YouTube
+        decrypted_api_key = decrypt_api_key(channel.api_key)
+        youtube_service = YouTubeService(api_key=decrypted_api_key)
         videos = await youtube_service.get_recent_videos(channel.youtube_id, limit)
+        
+        print(f"Vídeos obtidos do YouTube: {len(videos)}")
+        print(f"Dados dos vídeos: {videos}")
         
         # Atualiza ou cria os vídeos no banco de dados
         db_videos = []
         for video in videos:
+            print(f"\nProcessando vídeo: {video}")
+            # Garante que o video_id seja string
+            video_id = str(video["id"])
+            print(f"ID do vídeo: {video_id}")
+            
+            # Usa o formato padrão de thumbnail do YouTube em alta qualidade
+            thumbnail_url = f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg"
+            print(f"URL da thumbnail: {thumbnail_url}")
+            
             video_data = schemas.YoutubeVideoCreate(
                 channel_id=channel.id,
-                video_id=video["id"],
+                video_id=video_id,
                 title=video["title"],
-                description=video.get("description", ""),
-                thumbnail_url=video["thumbnail_url"],
+                thumbnail_url=thumbnail_url,
                 published_at=video["published_at"],
-                view_count=video.get("view_count"),
-                like_count=video.get("like_count"),
                 is_live=video.get("is_live", False)
             )
-            db_video = crud.youtube_video.get_by_video_id(db, video_id=video["id"])
+            print(f"Dados do vídeo formatados: {video_data}")
+            
+            # Verifica se o vídeo já existe
+            db_video = crud_youtube.get_video_by_youtube_id(db, youtube_id=video_id, channel_id=channel.id)
             if db_video:
-                db_video = crud.youtube_video.update(db, db_obj=db_video, obj_in=video_data)
+                print(f"Atualizando vídeo existente: {video_id}")
+                db_video = crud_youtube.update_video(db, db_obj=db_video, obj_in=video_data)
             else:
-                db_video = crud.youtube_video.create(db, obj_in=video_data)
+                print(f"Criando novo vídeo: {video_id}")
+                db_video = crud_youtube.create_video(db, obj_in=video_data, channel_id=channel.id)
+            
+            print(f"Vídeo processado: {db_video.id} - {db_video.title} - {db_video.thumbnail_url}")
             db_videos.append(db_video)
-        
-        return db_videos
+            
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao obter vídeos: {str(e)}"
+        print(f"Erro ao obter vídeos do YouTube: {str(e)}")
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}")
+        print("Buscando vídeos do banco de dados...")
+        # Se falhar, retorna os vídeos do banco de dados
+        db_videos = (
+            db.query(models.YoutubeVideo)
+            .filter(models.YoutubeVideo.channel_id == channel_id)
+            .order_by(desc(models.YoutubeVideo.published_at))
+            .limit(limit)
+            .all()
         )
+        print(f"Vídeos encontrados no banco: {len(db_videos)}")
+        for video in db_videos:
+            print(f"Vídeo do banco: {video.id} - {video.title} - {video.thumbnail_url}")
+    
+    return db_videos
 
 
 @router.put("/channels/{channel_id}", response_model=schemas.YoutubeChannel)
@@ -263,11 +323,11 @@ async def update_channel(
     """
     Atualizar canal do YouTube.
     """
-    channel = crud.youtube.get(db=db, id=channel_id)
+    channel = crud_youtube.get_channel(db=db, id=channel_id)
     if not channel:
         raise HTTPException(status_code=404, detail="Canal não encontrado")
     
-    if not crud.youtube.user_can_edit(db, user_id=current_user.id, channel_id=channel_id):
+    if not crud_youtube.user_can_edit(db, user_id=current_user.id, channel_id=channel_id):
         raise HTTPException(status_code=403, detail="Permissão insuficiente")
 
     # Se a API key foi atualizada, criptografa a nova chave
@@ -276,7 +336,7 @@ async def update_channel(
         channel_data["api_key"] = encrypt_api_key(channel_data["api_key"])
     
     channel_data["updated_by"] = current_user.id
-    channel = crud.youtube.update(db=db, db_obj=channel, obj_in=channel_data)
+    channel = crud_youtube.update_channel(db=db, db_obj=channel, obj_in=channel_data)
     return channel
 
 
@@ -290,14 +350,14 @@ async def delete_channel(
     """
     Deletar canal do YouTube.
     """
-    channel = crud.youtube.get(db=db, id=channel_id)
+    channel = crud_youtube.get_channel(db=db, id=channel_id)
     if not channel:
         raise HTTPException(status_code=404, detail="Canal não encontrado")
     
-    if not crud.youtube.user_can_delete(db, user_id=current_user.id, channel_id=channel_id):
+    if not crud_youtube.user_can_delete(db, user_id=current_user.id, channel_id=channel_id):
         raise HTTPException(status_code=403, detail="Permissão insuficiente")
     
-    channel = crud.youtube.remove(db=db, id=channel_id)
+    channel = crud_youtube.remove_channel(db=db, id=channel_id)
     return {"message": "Canal removido com sucesso"}
 
 
@@ -311,11 +371,11 @@ async def sync_channel(
     """
     Sincronizar dados do canal com o YouTube.
     """
-    channel = crud.youtube.get(db=db, id=channel_id)
+    channel = crud_youtube.get_channel(db=db, id=channel_id)
     if not channel:
         raise HTTPException(status_code=404, detail="Canal não encontrado")
     
-    if not crud.youtube.user_can_edit(db, user_id=current_user.id, channel_id=channel_id):
+    if not crud_youtube.user_can_edit(db, user_id=current_user.id, channel_id=channel_id):
         raise HTTPException(status_code=403, detail="Permissão insuficiente")
 
     try:
@@ -331,7 +391,7 @@ async def sync_channel(
             **channel_info
         }
         
-        channel = crud.youtube.update(db=db, db_obj=channel, obj_in=channel_data)
+        channel = crud_youtube.update_channel(db=db, db_obj=channel, obj_in=channel_data)
         return channel
     except Exception as e:
         raise HTTPException(
@@ -351,11 +411,96 @@ def create_channel_access(
     """
     Conceder acesso ao canal para um usuário.
     """
-    if not crud.youtube.user_can_edit(db, user_id=current_user.id, channel_id=channel_id):
+    if not crud_youtube.user_can_edit(db, user_id=current_user.id, channel_id=channel_id):
         raise HTTPException(status_code=403, detail="Permissão insuficiente")
     
     access_data = access_in.dict()
     access_data["created_by"] = current_user.id
     
-    access = crud.youtube.create_access(db=db, obj_in=access_data)
-    return access 
+    access = crud_youtube.create_access(db=db, obj_in=access_data)
+    return access
+
+
+@router.post("/channels/{channel_id}/validate-video", response_model=schemas.YoutubeVideo)
+async def validate_video(
+    *,
+    db: Session = Depends(deps.get_db),
+    current_user: models.User = Depends(deps.get_current_user),
+    channel_id: int,
+    video_url: str = Body(..., embed=True)
+) -> Any:
+    """
+    Valida se um vídeo pertence ao canal e retorna suas informações.
+    """
+    # Verifica se o usuário tem acesso ao canal
+    if not crud_youtube.user_can_access_channel(db, user_id=current_user.id, channel_id=channel_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Sem permissão para acessar este canal"
+        )
+    
+    # Obtém o canal
+    channel = crud_youtube.get_channel(db, id=channel_id)
+    if not channel:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Canal não encontrado"
+        )
+    
+    try:
+        # Inicializa o serviço do YouTube
+        decrypted_api_key = decrypt_api_key(channel.api_key)
+        youtube_service = YouTubeService(api_key=decrypted_api_key)
+        
+        # Extrai o ID do vídeo da URL
+        video_id = await youtube_service.extract_video_id(video_url)
+        if not video_id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="URL do vídeo inválida. Por favor, verifique se a URL está correta."
+            )
+        
+        # Obtém informações do vídeo
+        video_info = await youtube_service.get_video_info(video_id)
+        if not video_info:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Não foi possível obter informações do vídeo. Verifique se o vídeo está disponível."
+            )
+        
+        # Verifica se o vídeo pertence ao canal
+        if video_info["channel_id"] != channel.youtube_id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Este vídeo não pertence ao canal selecionado"
+            )
+        
+        # Cria ou atualiza o vídeo no banco
+        video_data = schemas.YoutubeVideoCreate(
+            channel_id=channel.id,
+            video_id=video_id,
+            title=video_info["title"],
+            thumbnail_url=video_info["thumbnail_url"],
+            published_at=video_info["published_at"],
+            is_live=video_info.get("is_live", False)
+        )
+        
+        db_video = crud_youtube.get_video_by_youtube_id(db, youtube_id=video_id, channel_id=channel.id)
+        if db_video:
+            db_video = crud_youtube.update_video(db, db_obj=db_video, obj_in=video_data)
+        else:
+            db_video = crud_youtube.create_video(db, obj_in=video_data, channel_id=channel.id)
+        
+        return db_video
+        
+    except HTTPException as e:
+        # Repassa os erros HTTP já tratados
+        raise e
+    except Exception as e:
+        print(f"Erro ao validar vídeo: {str(e)}")
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Erro ao validar vídeo. Verifique se a URL está correta e tente novamente."
+        ) 
