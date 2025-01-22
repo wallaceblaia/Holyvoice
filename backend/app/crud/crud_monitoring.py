@@ -2,13 +2,15 @@ from typing import Dict, List, Optional, Union, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import func, case
 from fastapi.encoders import jsonable_encoder
+from datetime import datetime, timedelta
 
 from app.crud.base import CRUDBase
 from app.models.monitoring import (
     YoutubeMonitoring,
     MonitoringVideo,
     MonitoringStatus,
-    VideoProcessingStatus
+    VideoProcessingStatus,
+    MonitoringPlaylist
 )
 from app.models.youtube import YoutubeVideo, YoutubeChannel
 from app.schemas.monitoring import MonitoringCreate, MonitoringUpdate
@@ -61,47 +63,51 @@ class CRUDMonitoring(CRUDBase[YoutubeMonitoring, MonitoringCreate, MonitoringUpd
             
         return monitorings
 
-    def get_with_details(
-        self,
-        db: Session,
-        *,
-        id: int
-    ) -> Optional[YoutubeMonitoring]:
-        result = (
-            db.query(
-                YoutubeMonitoring,
-                YoutubeChannel.channel_name,
-                YoutubeChannel.avatar_image,
-                func.count(MonitoringVideo.id).label('total_videos'),
-                func.count(case(
-                    (MonitoringVideo.status == VideoProcessingStatus.completed, 1),
-                    else_=None
-                )).label('processed_videos')
-            )
-            .join(YoutubeChannel, YoutubeMonitoring.channel_id == YoutubeChannel.id)
-            .outerjoin(MonitoringVideo, YoutubeMonitoring.id == MonitoringVideo.monitoring_id)
-            .filter(YoutubeMonitoring.id == id)
-            .group_by(YoutubeMonitoring.id, YoutubeChannel.channel_name, YoutubeChannel.avatar_image)
-            .first()
-        )
-
-        if not result:
+    def get_with_details(self, db: Session, *, id: int) -> Optional[Dict[str, Any]]:
+        """
+        Retorna um monitoramento com detalhes do canal e estatísticas.
+        """
+        monitoring = db.query(YoutubeMonitoring).filter(YoutubeMonitoring.id == id).first()
+        if not monitoring:
             return None
 
-        monitoring = result[0]
-        monitoring.channel_name = result[1]
-        monitoring.channel_avatar = result[2]
-        monitoring.total_videos = result[3]
-        monitoring.processed_videos = result[4]
-        
-        # Carrega os vídeos relacionados
-        monitoring.videos = (
-            db.query(MonitoringVideo)
-            .filter(MonitoringVideo.monitoring_id == id)
-            .all()
-        )
+        # Obtém o canal
+        channel = db.query(YoutubeChannel).filter(YoutubeChannel.id == monitoring.channel_id).first()
+        if not channel:
+            return None
 
-        return monitoring
+        # Obtém os vídeos e calcula estatísticas
+        total_videos = db.query(MonitoringVideo).filter(
+            MonitoringVideo.monitoring_id == monitoring.id
+        ).count()
+
+        processed_videos = db.query(MonitoringVideo).filter(
+            MonitoringVideo.monitoring_id == monitoring.id,
+            MonitoringVideo.status == VideoProcessingStatus.completed
+        ).count()
+
+        # Obtém os vídeos do monitoramento
+        videos = db.query(MonitoringVideo).filter(
+            MonitoringVideo.monitoring_id == monitoring.id
+        ).all()
+
+        # Obtém os IDs das playlists do monitoramento
+        playlists = [
+            playlist.playlist_id 
+            for playlist in db.query(MonitoringPlaylist.playlist_id).filter(
+                MonitoringPlaylist.monitoring_id == monitoring.id
+            ).all()
+        ]
+
+        return {
+            **monitoring.__dict__,
+            "channel_name": channel.channel_name,
+            "channel_avatar": channel.avatar_image,
+            "total_videos": total_videos,
+            "processed_videos": processed_videos,
+            "videos": videos,
+            "playlists": playlists
+        }
 
     def create_with_videos(
         self,
@@ -138,20 +144,41 @@ class CRUDMonitoring(CRUDBase[YoutubeMonitoring, MonitoringCreate, MonitoringUpd
         db.refresh(db_obj)
         return db_obj
 
+    def _get_interval_delta(self, interval_time: int) -> timedelta:
+        """
+        Converte o intervalo em minutos para um objeto timedelta.
+        """
+        return timedelta(minutes=interval_time)
+
     def update(
         self,
         db: Session,
         *,
         db_obj: YoutubeMonitoring,
-        obj_in: MonitoringUpdate,
+        obj_in: Union[MonitoringUpdate, Dict[str, Any]],
         user_id: int
     ) -> YoutubeMonitoring:
-        update_data = obj_in.dict(exclude_unset=True)
-        
-        # Se o status mudou para active, atualiza next_check
-        if update_data.get("status") == MonitoringStatus.ACTIVE:
-            update_data["next_check"] = func.now()
-        
+        """
+        Atualiza um monitoramento existente.
+        """
+        if isinstance(obj_in, dict):
+            update_data = obj_in
+        else:
+            update_data = obj_in.model_dump(exclude_unset=True)
+
+        # Atualiza o usuário que fez a alteração
+        update_data["updated_by"] = user_id
+        update_data["updated_at"] = datetime.now()
+
+        # Se o status foi alterado para ativo, atualiza o next_check_at
+        if update_data.get("status") == "active":
+            db_obj.next_check_at = datetime.now()
+
+        # Se o monitoramento é contínuo, calcula o próximo check
+        if update_data.get("is_continuous") and update_data.get("interval_time"):
+            interval_delta = self._get_interval_delta(update_data["interval_time"])
+            db_obj.next_check_at = datetime.now() + interval_delta
+
         return super().update(db, db_obj=db_obj, obj_in=update_data)
 
     def create_with_owner(
@@ -175,6 +202,65 @@ class CRUDMonitoring(CRUDBase[YoutubeMonitoring, MonitoringCreate, MonitoringUpd
         db.commit()
         db.refresh(db_obj)
         return db_obj
+
+    def create_with_playlists(
+        self, db: Session, *, obj_in: MonitoringCreate, user_id: int
+    ) -> YoutubeMonitoring:
+        """
+        Cria um novo monitoramento com suas playlists.
+        """
+        # Cria o monitoramento
+        db_obj = YoutubeMonitoring(
+            channel_id=obj_in.channel_id,
+            name=obj_in.name,
+            is_continuous=obj_in.is_continuous,
+            interval_time=obj_in.interval_time,
+            created_by=user_id,
+            status=MonitoringStatus.active
+        )
+        db.add(db_obj)
+        db.flush()  # Obtém o ID do monitoramento sem commitar
+
+        # Adiciona as playlists se fornecidas
+        if obj_in.playlist_ids:
+            for playlist_id in obj_in.playlist_ids:
+                playlist = MonitoringPlaylist(
+                    monitoring_id=db_obj.id,
+                    playlist_id=playlist_id
+                )
+                db.add(playlist)
+
+        db.commit()
+        db.refresh(db_obj)
+        return db_obj
+
+    def update_playlists(
+        self, db: Session, *, monitoring_id: int, playlist_ids: List[str]
+    ) -> YoutubeMonitoring:
+        """
+        Atualiza as playlists de um monitoramento.
+        """
+        # Obtém o monitoramento
+        monitoring = self.get(db, id=monitoring_id)
+        if not monitoring:
+            raise ValueError("Monitoramento não encontrado")
+
+        # Remove todas as playlists existentes
+        db.query(MonitoringPlaylist).filter(
+            MonitoringPlaylist.monitoring_id == monitoring_id
+        ).delete()
+
+        # Adiciona as novas playlists
+        for playlist_id in playlist_ids:
+            playlist = MonitoringPlaylist(
+                monitoring_id=monitoring_id,
+                playlist_id=playlist_id
+            )
+            db.add(playlist)
+
+        db.commit()
+        db.refresh(monitoring)
+        return monitoring
 
 
 crud_monitoring = CRUDMonitoring() 

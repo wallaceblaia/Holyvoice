@@ -50,6 +50,26 @@ const statusMap = {
   }
 }
 
+function formatInterval(minutes: number | null): string {
+  if (!minutes) return ""
+  
+  if (minutes < 60) {
+    return `${minutes} minutos`
+  } else if (minutes < 1440) {
+    const hours = Math.floor(minutes / 60)
+    return `${hours} ${hours === 1 ? 'hora' : 'horas'}`
+  } else if (minutes < 10080) {
+    const days = Math.floor(minutes / 1440)
+    return `${days} ${days === 1 ? 'dia' : 'dias'}`
+  } else if (minutes < 43200) {
+    const weeks = Math.floor(minutes / 10080)
+    return `${weeks} ${weeks === 1 ? 'semana' : 'semanas'}`
+  } else {
+    const months = Math.floor(minutes / 43200)
+    return `${months} ${months === 1 ? 'mês' : 'meses'}`
+  }
+}
+
 export function MonitoringList() {
   const { toast } = useToast()
   const [monitorings, setMonitorings] = useState<Monitoring[]>([])
@@ -138,88 +158,95 @@ export function MonitoringList() {
   }
 
   return (
-    <div className="grid gap-4">
-      {monitorings.map((monitoring) => (
-        <Card
-          key={monitoring.id}
-          className="cursor-pointer hover:bg-accent/50 transition-colors"
-          onClick={() => router.push(`/dashboard/projects/monitoring/${monitoring.id}`)}
-        >
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                {monitoring.channel_avatar && (
-                  <img
-                    src={monitoring.channel_avatar}
-                    alt={monitoring.channel_name}
-                    className="h-12 w-12 rounded-full"
+    <div className="h-[calc(100vh-12rem)] overflow-y-auto">
+      <div className="space-y-4">
+        {monitorings.map((monitoring) => (
+          <Card 
+            key={monitoring.id} 
+            className="cursor-pointer hover:shadow-lg transition-shadow"
+            onClick={() => router.push(`/dashboard/projects/monitoring/${monitoring.id}`)}
+          >
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  {monitoring.channel_avatar && (
+                    <img
+                      src={monitoring.channel_avatar}
+                      alt={monitoring.channel_name}
+                      className="h-12 w-12 rounded-full"
+                    />
+                  )}
+                  <div>
+                    <h3 className="font-semibold">{monitoring.name}</h3>
+                    <p className="text-sm text-muted-foreground">
+                      {monitoring.channel_name}
+                    </p>
+                    {monitoring.is_continuous && monitoring.interval_time && (
+                      <p className="text-sm text-muted-foreground">
+                        Intervalo: {formatInterval(typeof monitoring.interval_time === 'string' ? parseInt(monitoring.interval_time) : monitoring.interval_time)}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge
+                    variant={monitoring.status === "active" ? "default" : "secondary"}
+                  >
+                    {monitoring.status === "active" ? "Ativo" : "Pausado"}
+                  </Badge>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleToggleStatus(monitoring.id, monitoring.status)
+                    }}
+                  >
+                    {monitoring.status === "active" ? (
+                      <Pause className="h-4 w-4" />
+                    ) : (
+                      <Play className="h-4 w-4" />
+                    )}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleDelete(monitoring.id)
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+              <div className="mt-4">
+                <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-primary"
+                    style={{
+                      width: `${(monitoring.processed_videos / monitoring.total_videos) * 100}%`,
+                    }}
                   />
-                )}
-                <div>
-                  <h3 className="font-semibold">{monitoring.name}</h3>
-                  <p className="text-sm text-muted-foreground">
-                    {monitoring.channel_name}
+                </div>
+                <div className="mt-2 flex items-center justify-between text-sm text-muted-foreground">
+                  <p>
+                    {monitoring.processed_videos} de {monitoring.total_videos} vídeos processados
+                  </p>
+                  <p>
+                    {monitoring.last_check_at
+                      ? `Última verificação ${formatDistanceToNow(
+                          new Date(monitoring.last_check_at),
+                          { locale: ptBR, addSuffix: true }
+                        )}`
+                      : "Nunca verificado"}
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                <Badge
-                  variant={monitoring.status === "active" ? "default" : "secondary"}
-                >
-                  {monitoring.status === "active" ? "Ativo" : "Pausado"}
-                </Badge>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    handleToggleStatus(monitoring.id, monitoring.status)
-                  }}
-                >
-                  {monitoring.status === "active" ? (
-                    <Pause className="h-4 w-4" />
-                  ) : (
-                    <Play className="h-4 w-4" />
-                  )}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    handleDelete(monitoring.id)
-                  }}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-            <div className="mt-4">
-              <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-primary"
-                  style={{
-                    width: `${(monitoring.processed_videos / monitoring.total_videos) * 100}%`,
-                  }}
-                />
-              </div>
-              <div className="mt-2 flex items-center justify-between text-sm text-muted-foreground">
-                <p>
-                  {monitoring.processed_videos} de {monitoring.total_videos} vídeos processados
-                </p>
-                <p>
-                  {monitoring.last_check_at
-                    ? `Última verificação ${formatDistanceToNow(
-                        new Date(monitoring.last_check_at),
-                        { locale: ptBR, addSuffix: true }
-                      )}`
-                    : "Nunca verificado"}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      ))}
+            </CardContent>
+          </Card>
+        ))}
+      </div>
     </div>
   )
 } 

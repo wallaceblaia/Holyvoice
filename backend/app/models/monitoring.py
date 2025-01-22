@@ -39,39 +39,44 @@ class VideoProcessingStatus(str, enum.Enum):
     skipped = "skipped"
 
 
+class MonitoringPlaylist(Base):
+    __tablename__ = "monitoring_playlist"
+
+    id = Column(Integer, primary_key=True, index=True)
+    monitoring_id = Column(Integer, ForeignKey("youtube_monitoring.id"), nullable=False)
+    playlist_id = Column(String, nullable=False)  # ID da playlist no YouTube
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relacionamentos
+    monitoring = relationship("YoutubeMonitoring", back_populates="playlists")
+
+    def __repr__(self):
+        return f"<MonitoringPlaylist monitoring={self.monitoring_id} playlist={self.playlist_id}>"
+
+
 class YoutubeMonitoring(Base):
     __tablename__ = "youtube_monitoring"
 
     id = Column(Integer, primary_key=True, index=True)
     channel_id = Column(Integer, ForeignKey("youtube_channel.id"), nullable=False)
-    name = Column(String, nullable=False)  # Nome do monitoramento para identificação
-    is_continuous = Column(Boolean, default=False)
-    interval_time = Column(
-        Enum(MonitoringInterval),
-        nullable=True
-    )
-    status = Column(
-        Enum(MonitoringStatus),
-        nullable=False,
-        default=MonitoringStatus.active
-    )
-    
-    # Campos de auditoria
+    name = Column(String, nullable=False)
+    is_continuous = Column(Boolean, nullable=False, default=False)
+    interval_time = Column(Integer, nullable=True)  # Intervalo em minutos
+    status = Column(Enum(MonitoringStatus), nullable=False, default=MonitoringStatus.not_configured)
     created_by = Column(Integer, ForeignKey("user.id"), nullable=False)
     updated_by = Column(Integer, ForeignKey("user.id"), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=True)
     last_check_at = Column(DateTime(timezone=True), nullable=True)
     next_check_at = Column(DateTime(timezone=True), nullable=True)
 
     # Relacionamentos
-    channel = relationship("YoutubeChannel", backref="monitorings")
-    creator = relationship("User", foreign_keys=[created_by], backref="created_monitorings")
-    updater = relationship("User", foreign_keys=[updated_by], backref="updated_monitorings")
+    channel = relationship("YoutubeChannel", back_populates="monitorings")
     videos = relationship("MonitoringVideo", back_populates="monitoring", cascade="all, delete-orphan")
+    playlists = relationship("MonitoringPlaylist", back_populates="monitoring", cascade="all, delete-orphan")
 
     def __repr__(self):
-        return f"<YoutubeMonitoring {self.name}>"
+        return f"<YoutubeMonitoring name={self.name} channel={self.channel_id}>"
 
 
 class MonitoringVideo(Base):

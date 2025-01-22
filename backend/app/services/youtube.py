@@ -16,19 +16,15 @@ class YouTubeService:
 
     async def extract_channel_id(self, channel_url: str) -> Optional[str]:
         try:
-            print(f"Extraindo ID do canal da URL: {channel_url}")
             with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
                 info = ydl.extract_info(channel_url, download=False)
                 channel_id = info.get('channel_id')
-                print(f"ID do canal extraído: {channel_id}")
                 return channel_id
         except Exception as e:
-            print(f"Erro ao extrair ID do canal: {str(e)}")
             return None
 
     async def get_channel_info(self, channel_url: str) -> Optional[Dict[str, Any]]:
         try:
-            print(f"Obtendo informações do canal: {channel_url}")
             with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
                 info = ydl.extract_info(f"{channel_url}/videos", download=False)
                 
@@ -45,15 +41,12 @@ class YouTubeService:
                     "video_count": info.get('playlist_count', 0),
                     "view_count": 0  # Será calculado pela soma dos vídeos
                 }
-                print(f"Informações obtidas: {channel_info}")
                 return channel_info
         except Exception as e:
-            print(f"Erro ao obter informações do canal: {str(e)}")
             return None
 
     async def get_recent_videos(self, channel_id: str, max_results: int = 12) -> List[Dict[str, Any]]:
         try:
-            print(f"Buscando {max_results} vídeos recentes do canal {channel_id}")
             ydl_opts = {
                 **self.ydl_opts,
                 'playlist_items': f'1-{max_results}'
@@ -61,19 +54,10 @@ class YouTubeService:
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(f"https://www.youtube.com/channel/{channel_id}/videos", download=False)
-                print("Dados brutos retornados pelo yt-dlp:")
-                print(info)
                 
                 videos = []
-                print("\nProcessando entradas de vídeos:")
                 for entry in info.get('entries', []):
                     if entry:
-                        print(f"\nDados do vídeo:")
-                        print(f"ID: {entry.get('id')}")
-                        print(f"Título: {entry.get('title')}")
-                        print(f"Data de upload: {entry.get('upload_date')}")
-                        print(f"Thumbnails: {entry.get('thumbnails')}")
-                        
                         upload_date = entry.get('upload_date', '')
                         try:
                             published_at = datetime.strptime(upload_date, '%Y%m%d') if upload_date else datetime.now()
@@ -95,16 +79,11 @@ class YouTubeService:
                             "like_count": entry.get('like_count', 0),
                             "is_live": entry.get('is_live', False)
                         }
-                        print(f"Vídeo processado: {video}")
                         videos.append(video)
                 
-                print(f"Total de vídeos processados: {len(videos)}")
                 return videos
                 
         except Exception as e:
-            print(f"Erro ao obter vídeos recentes: {str(e)}")
-            import traceback
-            print(f"Traceback: {traceback.format_exc()}")
             return []
 
     async def validate_channel(self, channel_url: str) -> Dict[str, Any]:
@@ -159,35 +138,37 @@ class YouTubeService:
         await YouTubeCache.set_channel_info(channel_id, channel_info)
         return channel_info
 
-    async def get_playlists(self, channel_id: str) -> List[Dict[str, Any]]:
+    async def get_playlists(self, channel_url: str) -> List[Dict[str, Any]]:
         """
-        Obtém todas as playlists do canal.
+        Obtém todas as playlists do canal usando yt-dlp.
         """
-        # Tenta obter do cache primeiro
-        cached_data = await YouTubeCache.get_channel_playlists(channel_id)
-        if cached_data:
-            return cached_data
-
-        params = {
-            "part": "snippet,contentDetails",
-            "channelId": channel_id,
-            "maxResults": 50
-        }
-        
-        data = await self._make_request("playlists", params)
-        playlists = [
-            {
-                "playlist_id": item["id"],
-                "title": item["snippet"]["title"],
-                "description": item["snippet"]["description"],
-                "video_count": item["contentDetails"]["itemCount"]
+        try:
+            playlists_url = f"{channel_url}/playlists"
+            
+            ydl_opts = {
+                **self.ydl_opts,
+                'extract_flat': True,
             }
-            for item in data.get("items", [])
-        ]
-
-        # Salva no cache
-        await YouTubeCache.set_channel_playlists(channel_id, playlists)
-        return playlists
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(playlists_url, download=False)
+                
+                playlists = []
+                for entry in info.get('entries', []):
+                    if entry:
+                        playlist = {
+                            "playlist_id": entry.get('id', ''),
+                            "title": entry.get('title', ''),
+                            "description": entry.get('description', ''),
+                            "thumbnail_url": entry.get('thumbnail', ''),
+                            "video_count": entry.get('video_count', 0)
+                        }
+                        playlists.append(playlist)
+                
+                return playlists
+                
+        except Exception as e:
+            return []
 
     async def get_playlist_videos(self, playlist_id: str, max_results: int = 50) -> List[Dict[str, Any]]:
         """
@@ -223,7 +204,6 @@ class YouTubeService:
 
     async def extract_video_id(self, video_url: str) -> Optional[str]:
         try:
-            print(f"Extraindo ID do vídeo da URL: {video_url}")
             with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
                 info = ydl.extract_info(video_url, download=False, process=False)
                 # Verifica se é um vídeo individual
@@ -233,19 +213,15 @@ class YouTubeService:
                     video_id_match = re.search(r'v=([^&]+)', video_url)
                     if video_id_match:
                         video_id = video_id_match.group(1)
-                        print(f"ID do vídeo extraído: {video_id}")
                         return video_id
                 # Se não for um vídeo individual, tenta pegar o ID diretamente
                 video_id = info.get('id')
-                print(f"ID do vídeo extraído: {video_id}")
                 return video_id
         except Exception as e:
-            print(f"Erro ao extrair ID do vídeo: {str(e)}")
             return None
 
     async def get_video_info(self, video_id: str) -> Optional[Dict[str, Any]]:
         try:
-            print(f"Obtendo informações do vídeo: {video_id}")
             video_url = f"https://www.youtube.com/watch?v={video_id}"
             with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
                 info = ydl.extract_info(video_url, download=False)
@@ -267,8 +243,6 @@ class YouTubeService:
                     "like_count": info.get('like_count', 0),
                     "is_live": info.get('is_live', False)
                 }
-                print(f"Informações obtidas: {video_info}")
                 return video_info
         except Exception as e:
-            print(f"Erro ao obter informações do vídeo: {str(e)}")
             return None 

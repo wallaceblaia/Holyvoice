@@ -5,6 +5,24 @@ from pydantic import BaseModel, Field
 from app.models.monitoring import MonitoringInterval, MonitoringStatus, VideoProcessingStatus
 
 
+# Schemas para MonitoringPlaylist
+class MonitoringPlaylistBase(BaseModel):
+    playlist_id: str = Field(..., description="ID da playlist no YouTube")
+
+
+class MonitoringPlaylistCreate(MonitoringPlaylistBase):
+    pass
+
+
+class MonitoringPlaylistInDB(MonitoringPlaylistBase):
+    id: int
+    monitoring_id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 # Schemas para MonitoringVideo
 class MonitoringVideoBase(BaseModel):
     video_id: int
@@ -34,49 +52,35 @@ class MonitoringVideoInDB(MonitoringVideoBase):
         from_attributes = True
 
 
-# Schemas para YoutubeMonitoring
+# Schemas para Monitoring
 class MonitoringBase(BaseModel):
-    name: str = Field(..., description="Nome do monitoramento para identificação")
-    channel_id: int = Field(..., description="ID do canal do YouTube a ser monitorado")
-    is_continuous: bool = Field(
-        default=False,
-        description="Se o monitoramento deve ser contínuo"
-    )
-    interval_time: Optional[MonitoringInterval] = Field(
-        None,
-        description="Intervalo de tempo para monitoramento contínuo"
-    )
+    name: str
+    channel_id: int
+    is_continuous: bool = False
+    interval_time: Optional[int] = None  # Intervalo em minutos
+    status: str = "not_configured"
 
 
-class MonitoringCreate(BaseModel):
-    name: str = Field(..., min_length=1, description="Nome do monitoramento")
-    channel_id: int = Field(..., description="ID do canal a ser monitorado")
-    is_continuous: bool = Field(False, description="Se o monitoramento é contínuo")
-    interval_time: Optional[MonitoringInterval] = Field(None, description="Intervalo de verificação para monitoramento contínuo")
-    videos: List[int] = Field(default_factory=list, description="Lista de IDs dos vídeos a monitorar")
+class MonitoringCreate(MonitoringBase):
+    playlist_ids: Optional[List[str]] = None
 
 
 class MonitoringUpdate(BaseModel):
-    name: Optional[str] = Field(None, min_length=1)
+    name: Optional[str] = None
     is_continuous: Optional[bool] = None
-    interval_time: Optional[MonitoringInterval] = None
-    status: Optional[MonitoringStatus] = None
-    videos: Optional[List[int]] = Field(None, description="Lista de IDs dos vídeos a monitorar")
+    interval_time: Optional[int] = None  # Intervalo em minutos
+    status: Optional[str] = None
+    playlist_ids: Optional[List[str]] = None
 
 
 class MonitoringInDB(MonitoringBase):
     id: int
-    status: MonitoringStatus
     created_by: int
-    updated_by: Optional[int]
+    updated_by: Optional[int] = None
     created_at: datetime
-    updated_at: Optional[datetime]
-    last_check_at: Optional[datetime]
-    next_check_at: Optional[datetime]
-    channel_name: str = ""  # Nome do canal
-    channel_avatar: Optional[str] = None  # Avatar do canal
-    total_videos: int = 0  # Total de vídeos monitorados
-    processed_videos: int = 0  # Total de vídeos processados
+    updated_at: Optional[datetime] = None
+    last_check_at: Optional[datetime] = None
+    next_check_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -84,11 +88,9 @@ class MonitoringInDB(MonitoringBase):
 
 # Schema para resposta completa com informações do canal
 class MonitoringWithDetails(MonitoringInDB):
-    channel_name: str
-    channel_avatar: Optional[str]
     total_videos: int
     processed_videos: int
-    videos: List[MonitoringVideoInDB]
+    playlists: List[str]
 
     class Config:
         from_attributes = True
@@ -102,7 +104,7 @@ class MonitoringListItem(BaseModel):
     channel_avatar: Optional[str]
     status: MonitoringStatus
     is_continuous: bool
-    interval_time: Optional[MonitoringInterval]
+    interval_time: Optional[int]  # Intervalo em minutos
     created_at: datetime
     last_check_at: Optional[datetime]
     total_videos: int
