@@ -7,7 +7,7 @@ export interface Monitoring {
   channel_avatar: string | null
   status: "active" | "paused" | "completed" | "error"
   is_continuous: boolean
-  interval_time: string | null
+  interval_time: number | null
   created_at: string
   last_check_at: string | null
   total_videos: number
@@ -19,7 +19,8 @@ export interface CreateMonitoringData {
   channel_id: number
   videos: number[]
   is_continuous: boolean
-  interval_time?: string
+  interval_time?: number
+  playlist_ids?: string[]
 }
 
 export async function listMonitorings() {

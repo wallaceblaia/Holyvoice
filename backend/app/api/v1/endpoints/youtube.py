@@ -2,6 +2,7 @@ from typing import Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status, Body
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
+from datetime import datetime
 
 from app.crud.crud_youtube import crud_youtube
 from app import models, schemas
@@ -249,26 +250,19 @@ async def get_channel_videos(
         raise HTTPException(status_code=403, detail="Acesso não autorizado")
     
     try:
-        print("Tentando buscar vídeos do YouTube...")
         # Primeiro tenta buscar do YouTube
         decrypted_api_key = decrypt_api_key(channel.api_key)
         youtube_service = YouTubeService(api_key=decrypted_api_key)
         videos = await youtube_service.get_recent_videos(channel.youtube_id, limit)
         
-        print(f"Vídeos obtidos do YouTube: {len(videos)}")
-        print(f"Dados dos vídeos: {videos}")
-        
         # Atualiza ou cria os vídeos no banco de dados
         db_videos = []
         for video in videos:
-            print(f"\nProcessando vídeo: {video}")
             # Garante que o video_id seja string
             video_id = str(video["id"])
-            print(f"ID do vídeo: {video_id}")
             
             # Usa o formato padrão de thumbnail do YouTube em alta qualidade
             thumbnail_url = f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg"
-            print(f"URL da thumbnail: {thumbnail_url}")
             
             video_data = schemas.YoutubeVideoCreate(
                 channel_id=channel.id,
@@ -278,25 +272,17 @@ async def get_channel_videos(
                 published_at=video["published_at"],
                 is_live=video.get("is_live", False)
             )
-            print(f"Dados do vídeo formatados: {video_data}")
             
             # Verifica se o vídeo já existe
             db_video = crud_youtube.get_video_by_youtube_id(db, youtube_id=video_id, channel_id=channel.id)
             if db_video:
-                print(f"Atualizando vídeo existente: {video_id}")
                 db_video = crud_youtube.update_video(db, db_obj=db_video, obj_in=video_data)
             else:
-                print(f"Criando novo vídeo: {video_id}")
                 db_video = crud_youtube.create_video(db, obj_in=video_data, channel_id=channel.id)
             
-            print(f"Vídeo processado: {db_video.id} - {db_video.title} - {db_video.thumbnail_url}")
             db_videos.append(db_video)
             
     except Exception as e:
-        print(f"Erro ao obter vídeos do YouTube: {str(e)}")
-        import traceback
-        print(f"Traceback: {traceback.format_exc()}")
-        print("Buscando vídeos do banco de dados...")
         # Se falhar, retorna os vídeos do banco de dados
         db_videos = (
             db.query(models.YoutubeVideo)
@@ -305,9 +291,6 @@ async def get_channel_videos(
             .limit(limit)
             .all()
         )
-        print(f"Vídeos encontrados no banco: {len(db_videos)}")
-        for video in db_videos:
-            print(f"Vídeo do banco: {video.id} - {video.title} - {video.thumbnail_url}")
     
     return db_videos
 
@@ -497,10 +480,57 @@ async def validate_video(
         # Repassa os erros HTTP já tratados
         raise e
     except Exception as e:
-        print(f"Erro ao validar vídeo: {str(e)}")
-        import traceback
-        print(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Erro ao validar vídeo. Verifique se a URL está correta e tente novamente."
+        )
+
+
+@router.get("/channels/{channel_id}/playlists", response_model=List[schemas.YoutubePlaylist])
+async def get_channel_playlists(
+    channel_id: int,
+    db: Session = Depends(deps.get_db),
+    current_user: models.User = Depends(deps.get_current_user),
+) -> Any:
+    """
+    Retorna todas as playlists de um canal.
+    """
+    channel = crud_youtube.get_channel(db, id=channel_id)
+    if not channel:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Canal não encontrado",
+        )
+
+    if not crud_youtube.user_can_access_channel(db, user_id=current_user.id, channel_id=channel.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso não autorizado a este canal",
+        )
+
+    try:
+        decrypted_api_key = decrypt_api_key(channel.api_key)
+        youtube_service = YouTubeService(api_key=decrypted_api_key)
+        playlists = await youtube_service.get_playlists(channel.channel_url)
+        
+        # Formata as playlists para incluir todos os campos obrigatórios
+        formatted_playlists = []
+        for playlist in playlists:
+            formatted_playlist = schemas.YoutubePlaylist(
+                id=0,  # ID será definido quando salvo no banco
+                channel_id=channel.id,
+                playlist_id=playlist["playlist_id"],
+                title=playlist["title"],
+                description=playlist.get("description", ""),
+                thumbnail_url=playlist.get("thumbnail_url", ""),
+                video_count=playlist.get("video_count", 0),
+                created_at=datetime.utcnow()
+            )
+            formatted_playlists.append(formatted_playlist)
+            
+        return formatted_playlists
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Não foi possível obter as playlists do canal. Tente novamente mais tarde.",
         ) 

@@ -27,6 +27,7 @@ class YoutubePlaylistBase(BaseModel):
     title: str = Field(..., min_length=1)
     description: Optional[str] = None
     thumbnail_url: Optional[str] = None
+    video_count: Optional[int] = Field(0, description="Número de vídeos na playlist")
 
 
 class YoutubePlaylistCreate(YoutubePlaylistBase):

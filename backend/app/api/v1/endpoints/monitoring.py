@@ -2,12 +2,15 @@ from typing import List, Optional, Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from fastapi import status
+from datetime import datetime
 
 from app.crud.crud_monitoring import crud_monitoring
 from app.crud.crud_youtube import crud_youtube
 from app import models, schemas
 from app.api import deps
 from app.core.security import get_current_active_user
+from app.services.youtube import YouTubeService
 
 router = APIRouter()
 
@@ -34,46 +37,55 @@ def list_monitorings(
 
 
 @router.post("/", response_model=schemas.MonitoringInDB)
-def create_monitoring(
+async def create_monitoring(
     *,
     db: Session = Depends(deps.get_db),
-    current_user: models.User = Depends(deps.get_current_user),
     monitoring_in: schemas.MonitoringCreate,
+    current_user: models.User = Depends(deps.get_current_user),
 ) -> Any:
     """
     Cria um novo monitoramento.
     """
-    # Verifica se o usuário tem acesso ao canal
-    if not crud_youtube.user_can_access_channel(
-        db, user_id=current_user.id, channel_id=monitoring_in.channel_id
-    ):
+    # Verifica se o canal existe e se o usuário tem acesso
+    channel = crud_youtube.get_channel(db, id=monitoring_in.channel_id)
+    if not channel:
         raise HTTPException(
-            status_code=403,
-            detail="Sem permissão de acesso ao canal"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Canal não encontrado",
         )
 
-    # Define o status inicial baseado na configuração
-    initial_status = models.MonitoringStatus.active if (
-        monitoring_in.is_continuous or (monitoring_in.videos and len(monitoring_in.videos) > 0)
-    ) else models.MonitoringStatus.not_configured
+    if not crud_youtube.user_can_access_channel(db, user_id=current_user.id, channel_id=channel.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso não autorizado a este canal",
+        )
 
-    # Se tiver vídeos, cria com os vídeos
-    if monitoring_in.videos:
-        videos = crud_youtube.get_videos_by_ids(db, video_ids=monitoring_in.videos)
-        monitoring = crud_monitoring.create_with_videos(
-            db=db,
-            obj_in=monitoring_in,
-            videos=videos,
-            user_id=current_user.id
+    # Se for monitoramento contínuo, verifica se foi fornecido um intervalo
+    if monitoring_in.is_continuous and not monitoring_in.interval_time:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Para monitoramento contínuo é necessário especificar o intervalo",
         )
-    else:
-        # Cria o monitoramento sem vídeos
-        monitoring = crud_monitoring.create_with_owner(
-            db=db,
-            obj_in=monitoring_in,
-            owner_id=current_user.id,
-            status=initial_status
-        )
+
+    # Se foram fornecidas playlists, verifica se elas existem no canal
+    if monitoring_in.playlist_ids:
+        youtube_service = YouTubeService()
+        playlists = await youtube_service.get_playlists(channel.channel_url)
+        valid_playlist_ids = [p["playlist_id"] for p in playlists]
+        
+        for playlist_id in monitoring_in.playlist_ids:
+            if playlist_id not in valid_playlist_ids:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Playlist {playlist_id} não encontrada no canal",
+                )
+
+    # Cria o monitoramento com as playlists
+    monitoring = crud_monitoring.create_with_playlists(
+        db=db,
+        obj_in=monitoring_in,
+        user_id=current_user.id
+    )
 
     return monitoring
 
@@ -82,51 +94,115 @@ def create_monitoring(
 def get_monitoring(
     *,
     db: Session = Depends(deps.get_db),
-    current_user: models.User = Depends(get_current_active_user),
-    monitoring_id: int
-):
+    monitoring_id: int,
+    current_user: models.User = Depends(deps.get_current_user),
+) -> Any:
     """
-    Retorna os detalhes de um monitoramento específico.
+    Retorna os detalhes de um monitoramento.
     """
     monitoring = crud_monitoring.get_with_details(db, id=monitoring_id)
     if not monitoring:
-        raise HTTPException(status_code=404, detail="Monitoramento não encontrado")
-    
-    if not crud_youtube.user_can_access_channel(
-        db, user_id=current_user.id, channel_id=monitoring.channel_id
-    ):
-        raise HTTPException(status_code=403, detail="Sem permissão de acesso")
-    
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Monitoramento não encontrado",
+        )
+
+    # Verifica se o usuário tem acesso ao canal
+    if not crud_youtube.user_can_access_channel(db, user_id=current_user.id, channel_id=monitoring["channel_id"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso não autorizado a este canal",
+        )
+
     return monitoring
 
 
-@router.put("/{monitoring_id}", response_model=schemas.MonitoringWithDetails)
-def update_monitoring(
-    *,
-    db: Session = Depends(deps.get_db),
-    current_user: models.User = Depends(get_current_active_user),
+def _convert_interval_to_minutes(interval: str) -> int:
+    """Converte o intervalo para minutos."""
+    intervals = {
+        "10_minutes": 10,
+        "20_minutes": 20,
+        "30_minutes": 30,
+        "45_minutes": 45,
+        "1_hour": 60,
+        "2_hours": 120,
+        "5_hours": 300,
+        "12_hours": 720,
+        "1_day": 1440,
+        "2_days": 2880,
+        "1_week": 10080,
+        "1_month": 43200  # Aproximação de 30 dias
+    }
+    return intervals.get(interval, 60)  # Default para 1 hora
+
+
+@router.put("/{monitoring_id}", response_model=schemas.MonitoringInDB)
+async def update_monitoring(
     monitoring_id: int,
-    monitoring_in: schemas.MonitoringUpdate
+    monitoring_in: schemas.MonitoringUpdate,
+    db: Session = Depends(deps.get_db),
+    current_user: models.User = Depends(deps.get_current_user),
 ):
     """
     Atualiza um monitoramento existente.
     """
     monitoring = crud_monitoring.get(db, id=monitoring_id)
     if not monitoring:
-        raise HTTPException(status_code=404, detail="Monitoramento não encontrado")
-    
-    if not crud_youtube.user_can_access_channel(
-        db, user_id=current_user.id, channel_id=monitoring.channel_id
-    ):
-        raise HTTPException(status_code=403, detail="Sem permissão de acesso")
-    
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Monitoramento não encontrado",
+        )
+
+    # Verifica se o usuário tem acesso ao canal
+    channel = crud_youtube.get_channel(db, id=monitoring.channel_id)
+    if not crud_youtube.user_can_access_channel(db, channel.id, current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Você não tem permissão para acessar este canal",
+        )
+
+    # Se o monitoramento é contínuo, precisa ter um intervalo
+    if monitoring_in.is_continuous and not monitoring_in.interval_time:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Para monitoramento contínuo é necessário especificar um intervalo",
+        )
+
+    # Se tem playlists, verifica se existem no canal
+    if monitoring_in.playlist_ids:
+        youtube_service = YouTubeService()
+        try:
+            playlists = await youtube_service.get_playlists(channel.channel_url)
+            playlist_ids = [p["playlist_id"] for p in playlists]
+            for playlist_id in monitoring_in.playlist_ids:
+                if playlist_id not in playlist_ids:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=f"Playlist {playlist_id} não encontrada no canal",
+                    )
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Erro ao validar playlists: {str(e)}",
+            )
+
+    # Atualiza o monitoramento
     monitoring = crud_monitoring.update(
         db,
         db_obj=monitoring,
         obj_in=monitoring_in,
-        user_id=current_user.id
+        user_id=current_user.id,
     )
-    return crud_monitoring.get_with_details(db, id=monitoring.id)
+
+    # Se tem playlists, atualiza
+    if monitoring_in.playlist_ids is not None:
+        crud_monitoring.update_playlists(
+            db,
+            monitoring_id=monitoring.id,
+            playlist_ids=monitoring_in.playlist_ids,
+        )
+
+    return monitoring
 
 
 @router.delete("/{monitoring_id}")

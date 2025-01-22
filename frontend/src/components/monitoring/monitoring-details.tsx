@@ -9,10 +9,12 @@ import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
-import { Play, Pause, Trash2, Plus } from "lucide-react"
+import { Play, Pause, Trash2, Plus, Youtube } from "lucide-react"
 import { api } from "@/lib/axios"
 import { formatDistanceToNow } from "date-fns"
 import { ptBR } from "date-fns/locale"
+import { AxiosError } from "axios"
+import { useRouter } from "next/navigation"
 
 interface Video {
   id: number
@@ -35,6 +37,7 @@ interface MonitoringDetails {
   last_check_at: string | null
   total_videos: number
   processed_videos: number
+  playlist_ids: string[]
   videos: Array<{
     id: number
     video_id: number
@@ -44,23 +47,31 @@ interface MonitoringDetails {
   }>
 }
 
+interface Playlist {
+  playlist_id: string
+  title: string
+  description: string | null
+  thumbnail_url: string | null
+  video_count: number
+}
+
 interface MonitoringDetailsProps {
   monitoringId: number
 }
 
 const intervalOptions = [
-  { value: "10_minutes", label: "10 minutos" },
-  { value: "20_minutes", label: "20 minutos" },
-  { value: "30_minutes", label: "30 minutos" },
-  { value: "45_minutes", label: "45 minutos" },
-  { value: "1_hour", label: "1 hora" },
-  { value: "2_hours", label: "2 horas" },
-  { value: "5_hours", label: "5 horas" },
-  { value: "12_hours", label: "12 horas" },
-  { value: "1_day", label: "1 dia" },
-  { value: "2_days", label: "2 dias" },
-  { value: "1_week", label: "1 semana" },
-  { value: "1_month", label: "1 mês" }
+  { value: 10, label: "10 minutos" },
+  { value: 20, label: "20 minutos" },
+  { value: 30, label: "30 minutos" },
+  { value: 45, label: "45 minutos" },
+  { value: 60, label: "1 hora" },
+  { value: 120, label: "2 horas" },
+  { value: 300, label: "5 horas" },
+  { value: 720, label: "12 horas" },
+  { value: 1440, label: "1 dia" },
+  { value: 2880, label: "2 dias" },
+  { value: 10080, label: "1 semana" },
+  { value: 43200, label: "1 mês" },
 ]
 
 export function MonitoringDetails({ monitoringId }: MonitoringDetailsProps) {
@@ -69,8 +80,12 @@ export function MonitoringDetails({ monitoringId }: MonitoringDetailsProps) {
   const [recentVideos, setRecentVideos] = useState<Video[]>([])
   const [selectedVideos, setSelectedVideos] = useState<Video[]>([])
   const [isContinuous, setIsContinuous] = useState(false)
-  const [intervalTime, setIntervalTime] = useState<string | null>(null)
+  const [intervalTime, setIntervalTime] = useState<number | null>(null)
   const [videoUrl, setVideoUrl] = useState("")
+  const [playlists, setPlaylists] = useState<Playlist[]>([])
+  const [selectedPlaylists, setSelectedPlaylists] = useState<string[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+  const router = useRouter()
 
   // Carrega os detalhes do monitoramento
   async function loadMonitoring() {
@@ -78,7 +93,7 @@ export function MonitoringDetails({ monitoringId }: MonitoringDetailsProps) {
       const response = await api.get(`/api/v1/monitoring/${monitoringId}`)
       setMonitoring(response.data)
       setIsContinuous(response.data.is_continuous)
-      setIntervalTime(response.data.interval_time)
+      setIntervalTime(response.data.interval_time ? parseInt(response.data.interval_time) : null)
     } catch (error) {
       console.error("Erro ao carregar monitoramento:", error)
       toast({
@@ -118,6 +133,24 @@ export function MonitoringDetails({ monitoringId }: MonitoringDetailsProps) {
     }
   }
 
+  // Carrega as playlists do canal
+  async function loadPlaylists() {
+    if (!monitoring) return
+
+    try {
+      const response = await api.get<Playlist[]>(`/api/v1/youtube/channels/${monitoring.channel_id}/playlists`)
+      setPlaylists(response.data)
+      setSelectedPlaylists(monitoring.playlist_ids || [])
+    } catch (error) {
+      console.error("Erro ao carregar playlists:", error)
+      toast({
+        title: "Erro",
+        description: "Não foi possível carregar as playlists do canal",
+        variant: "destructive"
+      })
+    }
+  }
+
   // Valida e adiciona um vídeo por URL
   async function handleAddVideoByUrl() {
     if (!monitoring || !videoUrl) return
@@ -152,28 +185,45 @@ export function MonitoringDetails({ monitoringId }: MonitoringDetailsProps) {
   }
 
   // Atualiza a configuração do monitoramento
-  async function handleUpdateMonitoring() {
+  const handleUpdateMonitoring = async () => {
     if (!monitoring) return
 
     try {
-      const response = await api.put(`/api/v1/monitoring/${monitoringId}`, {
+      setIsLoading(true)
+
+      // Se for monitoramento contínuo, precisa ter um intervalo
+      if (isContinuous && !intervalTime) {
+        toast({
+          title: "Erro ao atualizar monitoramento",
+          description: "Para monitoramento contínuo é necessário especificar um intervalo",
+          variant: "destructive",
+        })
+        return
+      }
+
+      const data = {
         is_continuous: isContinuous,
-        interval_time: isContinuous ? intervalTime : null,
-        videos: isContinuous ? [] : selectedVideos.map(v => v.id)
+        interval_time: isContinuous ? intervalTime?.toString() : null,
+        playlist_ids: isContinuous ? selectedPlaylists : []
+      }
+
+      await api.put(`/api/v1/monitoring/${monitoring.id}`, data)
+
+      toast({
+        title: "Monitoramento atualizado",
+        description: "O monitoramento foi atualizado com sucesso",
       })
 
-      setMonitoring(response.data)
-      toast({
-        title: "Sucesso",
-        description: "Monitoramento atualizado com sucesso"
-      })
     } catch (error) {
-      console.error("Erro ao atualizar monitoramento:", error)
-      toast({
-        title: "Erro",
-        description: "Não foi possível atualizar o monitoramento",
-        variant: "destructive"
-      })
+      if (error instanceof AxiosError) {
+        toast({
+          title: "Erro ao atualizar monitoramento",
+          description: error.response?.data?.detail || "Erro ao atualizar monitoramento",
+          variant: "destructive",
+        })
+      }
+    } finally {
+      setIsLoading(false)
     }
   }
 
@@ -184,6 +234,7 @@ export function MonitoringDetails({ monitoringId }: MonitoringDetailsProps) {
   useEffect(() => {
     if (monitoring) {
       loadRecentVideos()
+      loadPlaylists()
     }
   }, [monitoring])
 
@@ -212,21 +263,51 @@ export function MonitoringDetails({ monitoringId }: MonitoringDetailsProps) {
           </div>
 
           {isContinuous && (
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Intervalo de Verificação</label>
-              <Select value={intervalTime || ""} onValueChange={setIntervalTime}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione um intervalo" />
-                </SelectTrigger>
-                <SelectContent>
-                  {intervalOptions.map(option => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
+            <>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Intervalo de Verificação</label>
+                <Select value={intervalTime?.toString() || ""} onValueChange={(value) => setIntervalTime(parseInt(value))}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione um intervalo" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {intervalOptions.map(option => (
+                      <SelectItem key={option.value} value={option.value.toString()}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Playlists para Monitorar</label>
+                <div className="grid grid-cols-2 gap-4">
+                  {playlists.map(playlist => (
+                    <Card 
+                      key={playlist.playlist_id}
+                      className={`cursor-pointer ${
+                        selectedPlaylists.includes(playlist.playlist_id) ? "ring-2 ring-primary" : ""
+                      }`}
+                      onClick={() => {
+                        if (selectedPlaylists.includes(playlist.playlist_id)) {
+                          setSelectedPlaylists(selectedPlaylists.filter(id => id !== playlist.playlist_id))
+                        } else {
+                          setSelectedPlaylists([...selectedPlaylists, playlist.playlist_id])
+                        }
+                      }}
+                    >
+                      <CardContent className="p-4">
+                        <h4 className="font-medium line-clamp-2">{playlist.title}</h4>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          {playlist.video_count} vídeos
+                        </p>
+                      </CardContent>
+                    </Card>
                   ))}
-                </SelectContent>
-              </Select>
-            </div>
+                </div>
+              </div>
+            </>
           )}
 
           {!isContinuous && (
@@ -307,7 +388,48 @@ export function MonitoringDetails({ monitoringId }: MonitoringDetailsProps) {
             </>
           )}
 
-          <Button onClick={handleUpdateMonitoring} className="w-full">
+          {isContinuous && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold">Playlists</h3>
+                <p className="text-sm text-muted-foreground">
+                  Selecione as playlists que deseja monitorar
+                </p>
+              </div>
+              
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {playlists.map((playlist) => (
+                  <Card
+                    key={playlist.playlist_id}
+                    className={`cursor-pointer transition-colors ${
+                      selectedPlaylists.includes(playlist.playlist_id)
+                        ? "border-primary"
+                        : "hover:border-primary/50"
+                    }`}
+                    onClick={() => {
+                      if (selectedPlaylists.includes(playlist.playlist_id)) {
+                        setSelectedPlaylists(selectedPlaylists.filter(id => id !== playlist.playlist_id))
+                      } else {
+                        setSelectedPlaylists([...selectedPlaylists, playlist.playlist_id])
+                      }
+                    }}
+                  >
+                    <CardHeader>
+                      <CardTitle className="line-clamp-2 text-base">
+                        {playlist.title}
+                      </CardTitle>
+                      <div className="flex items-center text-sm text-muted-foreground">
+                        <Youtube className="mr-1 h-4 w-4" />
+                        {playlist.video_count} vídeos
+                      </div>
+                    </CardHeader>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <Button onClick={handleUpdateMonitoring} className="w-full" disabled={isLoading}>
             Salvar Configuração
           </Button>
         </CardContent>

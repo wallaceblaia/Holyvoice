@@ -35,6 +35,7 @@ class YoutubeChannel(Base):
     playlists = relationship("YoutubePlaylist", back_populates="channel", cascade="all, delete-orphan")
     videos = relationship("YoutubeVideo", back_populates="channel", cascade="all, delete-orphan")
     access_permissions = relationship("YoutubeChannelAccess", back_populates="channel", cascade="all, delete-orphan")
+    monitorings = relationship("YoutubeMonitoring", back_populates="channel", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<YoutubeChannel {self.channel_name}>"

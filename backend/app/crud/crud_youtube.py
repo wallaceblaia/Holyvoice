@@ -102,18 +102,15 @@ class CRUDYoutube(CRUDBase[YoutubeChannel, ChannelCreate, ChannelUpdate]):
         update_data = obj_in.dict(exclude_unset=True)
         return super().update(db, db_obj=db_obj, obj_in=update_data)
 
-    def user_can_access_channel(
-        self, db: Session, *, user_id: int, channel_id: int
-    ) -> bool:
-        access = (
-            db.query(YoutubeChannelAccess)
-            .filter(
-                YoutubeChannelAccess.user_id == user_id,
-                YoutubeChannelAccess.channel_id == channel_id,
-                YoutubeChannelAccess.can_view == True
-            )
-            .first()
-        )
+    def user_can_access_channel(self, db: Session, channel_id: int, user_id: int) -> bool:
+        """
+        Verifica se o usuário tem acesso ao canal.
+        """
+        access = db.query(YoutubeChannelAccess).filter(
+            YoutubeChannelAccess.channel_id == channel_id,
+            YoutubeChannelAccess.user_id == user_id,
+            YoutubeChannelAccess.can_view == True
+        ).first()
         return access is not None
 
     def create_access(
