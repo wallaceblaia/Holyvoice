@@ -30,7 +30,7 @@ export default function LoginPage() {
         <div className="relative z-20 mt-auto">
           <blockquote className="space-y-2">
             <p className="text-lg">
-              "Transforme seus vídeos com tradução e dublagem profissional."
+              &quot;Transforme seus vídeos com tradução e dublagem profissional.&quot;
             </p>
           </blockquote>
         </div>
