@@ -1,5 +1,5 @@
 from typing import List, Optional, Any
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from fastapi import status
@@ -11,6 +11,7 @@ from app import models, schemas
 from app.api import deps
 from app.core.security import get_current_active_user
 from app.services.youtube import YouTubeService
+from app.services.monitoring_processor import MonitoringProcessor
 
 router = APIRouter()
 
@@ -225,4 +226,40 @@ def delete_monitoring(
         raise HTTPException(status_code=403, detail="Sem permissão de acesso")
     
     crud_monitoring.remove(db, id=monitoring_id)
-    return {"message": "Monitoramento removido com sucesso"} 
+    return {"message": "Monitoramento removido com sucesso"}
+
+
+@router.post("/{monitoring_id}/start", response_model=Any)
+async def start_monitoring(
+    monitoring_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(deps.get_db),
+) -> Any:
+    """
+    Inicia o processamento de um monitoramento.
+    """
+    try:
+        processor = MonitoringProcessor(db)
+        # Inicia o processamento em background
+        background_tasks.add_task(processor.start_monitoring, monitoring_id)
+        return {"message": "Processamento iniciado com sucesso"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{monitoring_id}/stop", response_model=Any)
+async def stop_monitoring(
+    monitoring_id: int,
+    db: Session = Depends(deps.get_db),
+) -> Any:
+    """
+    Para o processamento de um monitoramento.
+    """
+    try:
+        processor = MonitoringProcessor(db)
+        processor.stop_monitoring(monitoring_id)
+        return {"message": "Processamento interrompido com sucesso"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) 
