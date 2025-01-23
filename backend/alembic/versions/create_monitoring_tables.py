@@ -17,29 +17,6 @@ depends_on = None
 
 
 def upgrade():
-    # Cria o enum para intervalos de monitoramento
-    op.execute("""
-        CREATE TYPE monitoring_interval AS ENUM (
-            '10_minutes', '20_minutes', '30_minutes', '45_minutes',
-            '1_hour', '2_hours', '5_hours', '12_hours',
-            '1_day', '2_days', '1_week', '1_month'
-        )
-    """)
-
-    # Cria o enum para status do monitoramento
-    op.execute("""
-        CREATE TYPE monitoring_status AS ENUM (
-            'active', 'paused', 'completed', 'error'
-        )
-    """)
-
-    # Cria o enum para status do processamento de vídeo
-    op.execute("""
-        CREATE TYPE video_processing_status AS ENUM (
-            'pending', 'processing', 'completed', 'error', 'skipped'
-        )
-    """)
-
     # Cria a tabela de monitoramento
     op.create_table(
         'youtube_monitoring',
@@ -47,8 +24,8 @@ def upgrade():
         sa.Column('channel_id', sa.Integer(), nullable=False),
         sa.Column('name', sa.String(), nullable=False),
         sa.Column('is_continuous', sa.Boolean(), nullable=False, server_default='false'),
-        sa.Column('interval_time', sa.Enum('monitoring_interval', native_enum=False), nullable=True),
-        sa.Column('status', sa.Enum('monitoring_status', native_enum=False), nullable=False, server_default='active'),
+        sa.Column('interval_time', sa.Integer(), nullable=True),
+        sa.Column('status', sa.String(), nullable=False, server_default='active'),
         sa.Column('created_by', sa.Integer(), nullable=False),
         sa.Column('updated_by', sa.Integer(), nullable=True),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
@@ -68,7 +45,7 @@ def upgrade():
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('monitoring_id', sa.Integer(), nullable=False),
         sa.Column('video_id', sa.Integer(), nullable=False),
-        sa.Column('status', sa.Enum('video_processing_status', native_enum=False), nullable=False, server_default='pending'),
+        sa.Column('status', sa.String(), nullable=False, server_default='pending'),
         sa.Column('created_by', sa.Integer(), nullable=False),
         sa.Column('updated_by', sa.Integer(), nullable=True),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
@@ -89,6 +66,3 @@ def downgrade():
     op.drop_table('monitoring_video')
     op.drop_index(op.f('ix_youtube_monitoring_id'), table_name='youtube_monitoring')
     op.drop_table('youtube_monitoring')
-    op.execute('DROP TYPE video_processing_status')
-    op.execute('DROP TYPE monitoring_status')
-    op.execute('DROP TYPE monitoring_interval') 

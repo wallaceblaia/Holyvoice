@@ -1,7 +1,7 @@
 """create monitoring playlist table
 
 Revision ID: create_monitoring_playlist_table
-Revises: 
+Revises: add_monitoring_video_columns
 Create Date: 2024-02-14 10:00:00.000000
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'create_monitoring_playlist_table'
-down_revision: Union[str, None] = None
+down_revision: Union[str, None] = 'add_monitoring_video_columns'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -33,4 +33,4 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_index(op.f('ix_monitoring_playlist_id'), table_name='monitoring_playlist')
-    op.drop_table('monitoring_playlist') 
+    op.drop_table('monitoring_playlist')         

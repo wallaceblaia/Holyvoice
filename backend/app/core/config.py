@@ -22,11 +22,11 @@ class Settings(BaseSettings):
             return v
         raise ValueError(v)
 
-    POSTGRES_SERVER: str
-    POSTGRES_USER: str
-    POSTGRES_PASSWORD: str
-    POSTGRES_DB: str
-    SQLALCHEMY_DATABASE_URI: str = "postgresql://postgres:Salmo23*@localhost:5432/holyvoice"
+    POSTGRES_SERVER: Optional[str] = None
+    POSTGRES_USER: Optional[str] = None
+    POSTGRES_PASSWORD: Optional[str] = None
+    POSTGRES_DB: Optional[str] = None
+    SQLALCHEMY_DATABASE_URI: Optional[str] = None  # Will be built from components
 
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
@@ -50,4 +50,4 @@ class Settings(BaseSettings):
         env_file = ".env"
 
 
-settings = Settings() 
+settings = Settings()      

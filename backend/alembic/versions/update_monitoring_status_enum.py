@@ -12,45 +12,32 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'update_monitoring_status_enum'
-down_revision: Union[str, None] = 'create_monitoring_tables'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision = 'update_monitoring_status_enum'
+down_revision = 'create_monitoring_tables'
+branch_labels = None
+depends_on = None
 
 
 def upgrade() -> None:
-    # Primeiro remove a restrição do enum antigo
-    op.execute("ALTER TABLE youtube_monitoring ALTER COLUMN status TYPE VARCHAR")
-    
-    # Recria o enum com os valores corretos
-    op.execute("DROP TYPE IF EXISTS monitoring_status")
-    op.execute(
-        "CREATE TYPE monitoring_status AS ENUM "
-        "('not_configured', 'active', 'paused', 'completed', 'error')"
-    )
-    
-    # Atualiza a coluna para usar o novo enum
-    op.execute(
-        "ALTER TABLE youtube_monitoring "
-        "ALTER COLUMN status TYPE monitoring_status "
-        "USING status::monitoring_status"
-    )
+    # Update status values without using enum type
+    op.execute("""
+        UPDATE youtube_monitoring
+        SET status = CASE status
+            WHEN 'active' THEN 'active'
+            WHEN 'paused' THEN 'paused'
+            WHEN 'completed' THEN 'completed'
+            WHEN 'error' THEN 'error'
+            ELSE 'not_configured'
+        END
+    """)
 
 
 def downgrade() -> None:
-    # Remove a restrição do enum novo
-    op.execute("ALTER TABLE youtube_monitoring ALTER COLUMN status TYPE VARCHAR")
-    
-    # Recria o enum com os valores antigos
-    op.execute("DROP TYPE IF EXISTS monitoring_status")
-    op.execute(
-        "CREATE TYPE monitoring_status AS ENUM "
-        "('active', 'paused', 'completed', 'error')"
-    )
-    
-    # Atualiza a coluna para usar o enum antigo
-    op.execute(
-        "ALTER TABLE youtube_monitoring "
-        "ALTER COLUMN status TYPE monitoring_status "
-        "USING status::monitoring_status"
-    ) 
+    # Update status values to original set
+    op.execute("""
+        UPDATE youtube_monitoring
+        SET status = CASE status
+            WHEN 'not_configured' THEN 'active'
+            ELSE status
+        END
+    """)
